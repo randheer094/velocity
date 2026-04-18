@@ -29,25 +29,14 @@ jobs:
       - name: go test with coverage
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Publish coverage badge to badges branch
+      - name: Publish coverage report to wiki
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
-          int=${pct%.*}
-          if [ "$int" -lt 50 ]; then color=red
-          elif [ "$int" -lt 80 ]; then color=yellow
-          else color=brightgreen
-          fi
-          tmp=$(mktemp -d)
-          curl -sSLo "$tmp/coverage.svg" "https://img.shields.io/badge/coverage-${pct}%25-${color}"
-          cd "$tmp"
-          git init -q -b badges
-          git -c user.name=velocity-ci -c user.email=ci@velocity add coverage.svg
-          git -c user.name=velocity-ci -c user.email=ci@velocity commit -q -m "coverage: ${pct}%"
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" badges
+        uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage.out
+          report: true
+          chart: true
+          amend: false
 
       - name: cross-compile darwin/arm64
         env:
