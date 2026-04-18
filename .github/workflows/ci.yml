@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: vet + test + cross-compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test with coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Publish coverage report to wiki
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage.out
+          report: true
+          chart: true
+          amend: true
+        continue-on-error: true
+
+      - name: cross-compile darwin/arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -o /tmp/velocity-arm64 ./cmd/velocity
+
+      - name: cross-compile darwin/amd64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: go build -o /tmp/velocity-amd64 ./cmd/velocity

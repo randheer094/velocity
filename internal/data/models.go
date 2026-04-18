@@ -1,0 +1,109 @@
+// Package data holds the Plan / CodeTask value types (keyed on
+// Jira issue keys). Persistence lives in internal/db.
+package data
+
+import (
+	"fmt"
+	"regexp"
+	"time"
+)
+
+var jiraKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+
+func ValidJiraKey(s string) bool { return jiraKeyRe.MatchString(s) }
+
+// PlannedTask is one leaf ticket emitted by arch.
+type PlannedTask struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	JiraKey     string `json:"jira_key,omitempty"`
+}
+
+// Wave groups tasks safe to run in parallel; waves are sequential.
+type Wave struct {
+	Tasks []WaveRef `json:"tasks"`
+}
+
+type WaveRef struct {
+	ID      string `json:"id"`
+	JiraKey string `json:"jira_key,omitempty"`
+}
+
+type PlanStatus string
+
+const (
+	PlanActive         PlanStatus = "active"
+	PlanDone           PlanStatus = "done"
+	PlanPlanningFailed PlanStatus = "planning_failed"
+	PlanDismissed      PlanStatus = "dismissed"
+)
+
+// Plan is arch's full output, persisted per parent issue.
+type Plan struct {
+	ParentJiraKey   string        `json:"parent_jira_key"`
+	Name            string        `json:"name"`
+	RepoURL         string        `json:"repo_url"`
+	TaskList        []PlannedTask `json:"task_list"`
+	Waves           []Wave        `json:"waves"`
+	ActiveWaveIdx   int           `json:"active_wave_idx"`
+	Status          PlanStatus    `json:"status"`
+	LastError       string        `json:"last_error,omitempty"`
+	LastErrorStage  string        `json:"last_error_stage,omitempty"`
+	FailedAt        *time.Time    `json:"failed_at,omitempty"`
+	CompletedAt     *time.Time    `json:"completed_at,omitempty"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+}
+
+func (p Plan) Validate() error {
+	if !ValidJiraKey(p.ParentJiraKey) {
+		return fmt.Errorf("invalid parent jira key: %q", p.ParentJiraKey)
+	}
+	for i, t := range p.TaskList {
+		if t.ID == "" {
+			return fmt.Errorf("task_list[%d].id is required", i)
+		}
+		if t.Title == "" {
+			return fmt.Errorf("task_list[%d].title is required", i)
+		}
+	}
+	return nil
+}
+
+type CodeStatus string
+
+const (
+	CodeInProgress CodeStatus = "in_progress"
+	CodePROpen     CodeStatus = "pr_open"
+	CodeDone       CodeStatus = "done"
+	CodeFailed     CodeStatus = "code_failed"
+	CodeDismissed  CodeStatus = "dismissed"
+)
+
+// CodeTask is the persisted record for a sub-task's coding run.
+type CodeTask struct {
+	IssueKey       string     `json:"issue_key"`
+	ParentJiraKey  string     `json:"parent_jira_key"`
+	RepoURL        string     `json:"repo_url"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description,omitempty"`
+	Branch         string     `json:"branch,omitempty"`
+	PRURL          string     `json:"pr_url,omitempty"`
+	Status         CodeStatus `json:"status"`
+	Error          string     `json:"error,omitempty"`
+	LastErrorStage string     `json:"last_error_stage,omitempty"`
+	FailedAt       *time.Time `json:"failed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+func (c CodeTask) Validate() error {
+	if !ValidJiraKey(c.IssueKey) {
+		return fmt.Errorf("invalid issue_key: %q", c.IssueKey)
+	}
+	if c.RepoURL == "" {
+		return fmt.Errorf("repo_url is required")
+	}
+	return nil
+}
