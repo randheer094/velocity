@@ -1,8 +1,8 @@
 # velocity
 
 [![CI](https://img.shields.io/github/actions/workflow/status/randheer094/velocity/ci.yml?branch=main&label=CI)](https://github.com/randheer094/velocity/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/randheer094/velocity?label=release&display_name=tag&sort=semver)](https://github.com/randheer094/velocity/releases/latest)
-[![Coverage](https://img.shields.io/badge/coverage-report-blue)](https://raw.githack.com/wiki/randheer094/velocity/coverage.html)
+[![Release](https://img.shields.io/github/v/release/randheer094/velocity?label=release&display_name=tag)](https://github.com/randheer094/velocity/releases/latest)
+[![Coverage](https://raw.githubusercontent.com/wiki/randheer094/velocity/coverage.svg)](https://raw.githack.com/wiki/randheer094/velocity/coverage.html)
 
 Webhook-driven agent that takes a Jira parent ticket assigned to an
 architect, plans it with Claude, creates Jira sub-tasks, drives each

@@ -37,7 +37,6 @@ jobs:
           report: true
           chart: true
           amend: false
-        continue-on-error: true
 
       - name: cross-compile darwin/arm64
         env:
