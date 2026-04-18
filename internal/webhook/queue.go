@@ -37,11 +37,12 @@ func Start(ctx context.Context, workers, size int) {
 	rootCtx = ctx
 	queue = make(chan Job, size)
 	queueCap = size
+	q := queue
 	queueMu.Unlock()
 
 	for i := 0; i < workers; i++ {
 		workerWg.Add(1)
-		go worker()
+		go worker(q)
 	}
 	slog.Info("workqueue started", "workers", workers, "size", size)
 }
@@ -83,17 +84,11 @@ func Drain(ctx context.Context) {
 	}
 }
 
-func worker() {
+func worker(q <-chan Job) {
 	defer workerWg.Done()
-	for j := range receive() {
+	for j := range q {
 		runJob(j)
 	}
-}
-
-func receive() chan Job {
-	queueMu.Lock()
-	defer queueMu.Unlock()
-	return queue
 }
 
 func runJob(j Job) {
