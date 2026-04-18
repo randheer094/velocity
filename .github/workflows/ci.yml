@@ -36,7 +36,7 @@ jobs:
           coverage-file: coverage.out
           report: true
           chart: true
-          amend: true
+          amend: false
         continue-on-error: true
 
       - name: cross-compile darwin/arm64
