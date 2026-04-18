@@ -1,0 +1,68 @@
+package arch
+
+import (
+	"context"
+	"testing"
+
+	"github.com/randheer094/velocity/internal/data"
+	"github.com/randheer094/velocity/internal/db"
+)
+
+func TestOnDismissedNoPlan(t *testing.T) {
+	requireDB(t)
+	if err := OnDismissed(context.Background(), "ARCH-NOPE"); err != nil {
+		t.Errorf("OnDismissed missing plan: %v", err)
+	}
+}
+
+func TestOnDismissedTerminalIgnored(t *testing.T) {
+	requireDB(t)
+	ctx := context.Background()
+	plan := &data.Plan{
+		ParentJiraKey: "ARCH-TD",
+		Name:          "x",
+		RepoURL:       "r",
+		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-TD-1"}},
+		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-TD-1"}}}},
+	}
+	if err := db.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkPlanDone(ctx, "ARCH-TD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := OnDismissed(ctx, "ARCH-TD"); err != nil {
+		t.Errorf("OnDismissed terminal: %v", err)
+	}
+}
+
+func TestOnDismissedCascades(t *testing.T) {
+	requireDB(t)
+	ctx := context.Background()
+	plan := &data.Plan{
+		ParentJiraKey: "ARCH-DC",
+		Name:          "x",
+		RepoURL:       "r",
+		TaskList: []data.PlannedTask{
+			{ID: "t1", Title: "x", JiraKey: "ARCH-DC-1"},
+			{ID: "t2", Title: "y", JiraKey: "ARCH-DC-2"},
+		},
+		Waves: []data.Wave{
+			{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-DC-1"}}},
+			{Tasks: []data.WaveRef{{ID: "t2", JiraKey: "ARCH-DC-2"}}},
+		},
+	}
+	if err := db.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	// Mark one sub-task as Done; the cascade should skip it.
+	statusOverride.Store("ARCH-DC-1", "Done")
+	statusOverride.Store("ARCH-DC-2", "In Progress")
+	if err := OnDismissed(ctx, "ARCH-DC"); err != nil {
+		t.Fatalf("OnDismissed: %v", err)
+	}
+	got, _ := db.GetPlan(ctx, "ARCH-DC")
+	if got.Status != data.PlanDismissed {
+		t.Errorf("plan status = %q", got.Status)
+	}
+}

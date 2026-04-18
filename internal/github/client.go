@@ -15,10 +15,10 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 )
 
-const (
-	apiBase        = "https://api.github.com"
-	requestTimeout = 30 * time.Second
-)
+const requestTimeout = 30 * time.Second
+
+// apiBase is overridden by tests via the test helper in client_test.go.
+var apiBase = "https://api.github.com"
 
 type Client struct {
 	token string

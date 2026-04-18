@@ -25,6 +25,12 @@ var (
 	inFlightMu sync.Mutex
 )
 
+// Test seams: overridden by tests via code/main_test.go.
+var (
+	parseRepoURL        = github.ParseRepoURL
+	configureAuthRemote = git.ConfigureAuthenticatedRemote
+)
+
 func claim(key string) bool {
 	inFlightMu.Lock()
 	defer inFlightMu.Unlock()
@@ -113,7 +119,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	}
 
 	*stage = "parse-repo-url"
-	repoFullName, err := github.ParseRepoURL(repoURL)
+	repoFullName, err := parseRepoURL(repoURL)
 	if err != nil {
 		return err
 	}
@@ -127,7 +133,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	if err := git.Clone(repoURL, workspace); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
-	if err := git.ConfigureAuthenticatedRemote(workspace, repoFullName); err != nil {
+	if err := configureAuthRemote(workspace, repoFullName); err != nil {
 		return fmt.Errorf("auth remote: %w", err)
 	}
 
