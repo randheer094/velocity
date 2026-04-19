@@ -323,19 +323,21 @@ Add a repository (or org) webhook posting to
 - **Events**:
   - *Pull requests* — `closed` with `merged=true` transitions the
     sub-task to DONE.
-  - *Workflow runs* — `completed` with `conclusion=failure` on an
-    `IN_REVIEW` sub-task branch triggers velocity to rebase on the
-    default branch, ask the LLM to fix the failure, and force-push
-    with lease. Velocity fetches the failing-job logs via the
-    Actions API and inlines the tail into the LLM prompt, and
-    derives a short commit subject (`<KEY>: fix CI: <first error>`)
-    from it. Events on unknown branches are ignored.
+  - *Workflow runs* — `completed` with `conclusion=failure` whose
+    `pull_requests` array is non-empty triggers an iterate run on the
+    PR's head branch: fresh clone, LLM prompted to rebase onto the
+    default branch and resolve conflicts, then fix the failure, then
+    force-push with lease. Velocity fetches the failing-job logs via
+    the Actions API and inlines the tail into the LLM prompt, and
+    derives a short commit subject (`<branch>: fix CI: <first error>`)
+    from it. Runs without a PR (pushes to the default branch) are
+    ignored.
   - *Issue comments* — a PR comment starting with `/velocity
-    <instruction>` on an `IN_REVIEW` sub-task branch triggers the
-    same iterate flow with the instruction as LLM context. If the PR
-    is not in velocity's scope, velocity replies `Cannot perform any
-    action on this` and stops. Comments that don't start with
-    `/velocity` are ignored.
+    <instruction>` triggers the same iterate flow with the
+    instruction as LLM context. Empty instructions get a usage reply
+    on the PR; comments that don't start with `/velocity` are
+    ignored. The PR does **not** need to have been opened by
+    velocity — any PR in a webhook-configured repo can be iterated.
 
 Signature: `X-Hub-Signature-256` HMAC-SHA256. Mismatches → `401`.
 

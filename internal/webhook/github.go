@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,15 +12,16 @@ import (
 	"github.com/randheer094/velocity/internal/code"
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/data"
-	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/github"
 )
 
 const githubSignatureHeader = "X-Hub-Signature-256"
 
 // GithubHandler dispatches pull_request, workflow_run, and
-// issue_comment events. The head branch (= sub-task key) is the
-// lookup key for an existing velocity code task.
+// issue_comment events. `pull_request.closed(merged=true)` marks
+// velocity-owned sub-tasks as merged; `workflow_run` and
+// `issue_comment` trigger an iterate run on the PR branch regardless
+// of whether velocity opened the PR.
 type GithubHandler struct{}
 
 func (h GithubHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -92,14 +92,18 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 	var payload struct {
 		Action      string `json:"action"`
 		WorkflowRun struct {
-			ID         int64  `json:"id"`
-			Name       string `json:"name"`
-			HTMLURL    string `json:"html_url"`
-			Conclusion string `json:"conclusion"`
-			HeadBranch string `json:"head_branch"`
+			ID           int64  `json:"id"`
+			Name         string `json:"name"`
+			HTMLURL      string `json:"html_url"`
+			Conclusion   string `json:"conclusion"`
+			HeadBranch   string `json:"head_branch"`
+			PullRequests []struct {
+				Number int `json:"number"`
+			} `json:"pull_requests"`
 		} `json:"workflow_run"`
 		Repository struct {
 			FullName string `json:"full_name"`
+			CloneURL string `json:"clone_url"`
 		} `json:"repository"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -111,37 +115,32 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if len(payload.WorkflowRun.PullRequests) == 0 {
+		slog.Info("github webhook: workflow_run not associated with a PR, ignoring",
+			"branch", payload.WorkflowRun.HeadBranch)
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "no-pr"})
+		return
+	}
+
 	branch := payload.WorkflowRun.HeadBranch
-	if !data.ValidJiraKey(branch) {
-		slog.Info("github webhook: workflow_run head branch is not a jira key", "branch", branch)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "branch": branch})
-		return
-	}
+	repoFullName := payload.Repository.FullName
+	repoURL := repoCloneURL(payload.Repository.CloneURL, repoFullName)
+	prNum := payload.WorkflowRun.PullRequests[0].Number
+	prURL := prHTMLURL(repoFullName, prNum)
 
-	task := getCodeTaskByKey(branch)
-	if task == nil {
-		slog.Info("github webhook: workflow_run for unknown branch, ignoring", "branch", branch)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "unknown"})
-		return
-	}
-	if task.Status != data.CodeInReview {
-		slog.Info("github webhook: workflow_run but task not in review, ignoring",
-			"branch", branch, "status", task.Status)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "not-in-review"})
-		return
-	}
-
-	slog.Info("github webhook: CI failure, iterating", "branch", branch, "workflow", payload.WorkflowRun.Name)
-	summary := fetchWorkflowFailureSummary(payload.Repository.FullName, payload.WorkflowRun.ID)
+	slog.Info("github webhook: CI failure, iterating", "branch", branch, "workflow", payload.WorkflowRun.Name, "pr", prNum)
+	summary := fetchWorkflowFailureSummary(repoFullName, payload.WorkflowRun.ID)
 	reason := buildWorkflowRunInstruction(payload.WorkflowRun.Name, payload.WorkflowRun.HTMLURL, summary)
 	hint := deriveCICommitHint(payload.WorkflowRun.Name, summary)
 	Enqueue(KindCodeIterate, "code.Iterate:ci:"+branch, codeIteratePayload{
-		Branch: branch,
-		Reason: code.IterateCI,
-		Extra:  reason,
-		Hint:   hint,
+		RepoURL: repoURL,
+		Branch:  branch,
+		PRURL:   prURL,
+		Reason:  code.IterateCI,
+		Extra:   reason,
+		Hint:    hint,
 	})
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "branch": branch})
 }
 
 // fetchWorkflowFailureSummary is a package-level var so tests can stub
@@ -224,6 +223,7 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 		} `json:"comment"`
 		Repository struct {
 			FullName string `json:"full_name"`
+			CloneURL string `json:"clone_url"`
 		} `json:"repository"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -243,44 +243,60 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 
 	repo := payload.Repository.FullName
 	prNumber := payload.Issue.Number
-
-	branch := lookupBranchForPR(repo, prNumber)
-	task := getCodeTaskByKey(branch)
-	if task == nil || task.Status != data.CodeInReview {
-		slog.Info("github webhook: /velocity on out-of-scope PR", "repo", repo, "pr", prNumber, "branch", branch)
-		if repo != "" && prNumber > 0 {
-			github.New().AddPRComment(repo, prNumber, "Cannot perform any action on this")
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "out-of-scope"})
-		return
-	}
 	if instruction == "" {
-		github.New().AddPRComment(repo, prNumber, "Usage: `/velocity <instruction>` — describe the change you want.")
+		if repo != "" && prNumber > 0 {
+			github.New().AddPRComment(repo, prNumber, "Usage: `/velocity <instruction>` — describe the change you want.")
+		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "empty"})
 		return
 	}
+
+	branch := lookupBranchForPR(repo, prNumber)
+	if branch == "" {
+		slog.Info("github webhook: /velocity could not resolve PR head branch", "repo", repo, "pr", prNumber)
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "no-branch"})
+		return
+	}
+
+	repoURL := repoCloneURL(payload.Repository.CloneURL, repo)
+	prURL := prHTMLURL(repo, prNumber)
 
 	slog.Info("github webhook: /velocity command", "branch", branch, "instruction", instruction)
 	extra := "User command posted on the open PR: " + instruction
 	hint := truncateHint(instruction, 60)
 	Enqueue(KindCodeIterate, "code.Iterate:cmd:"+branch, codeIteratePayload{
-		Branch: branch,
-		Reason: code.IterateCommand,
-		Extra:  extra,
-		Hint:   hint,
+		RepoURL: repoURL,
+		Branch:  branch,
+		PRURL:   prURL,
+		Reason:  code.IterateCommand,
+		Extra:   extra,
+		Hint:    hint,
 	})
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "branch": branch})
 }
 
-// getCodeTaskByKey is a var so tests can stub the DB lookup without
-// needing a live Postgres in the webhook package.
-var getCodeTaskByKey = func(key string) *data.CodeTask {
-	t, _ := db.GetCodeTask(context.Background(), key)
-	return t
+// repoCloneURL prefers the webhook-provided clone_url; when missing
+// (older webhook payloads, tests) it falls back to the canonical
+// github.com URL derived from full_name.
+func repoCloneURL(cloneURL, fullName string) string {
+	if cloneURL != "" {
+		return cloneURL
+	}
+	if fullName == "" {
+		return ""
+	}
+	return "https://github.com/" + fullName + ".git"
+}
+
+func prHTMLURL(fullName string, number int) string {
+	if fullName == "" || number <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/pull/%d", fullName, number)
 }
 
 // lookupBranchForPR asks GitHub for a PR's head ref. Returning "" is
-// safe — callers fall back to the "out of scope" path.
+// safe — callers fall back to the "cannot resolve branch" path.
 var lookupBranchForPR = func(repoFullName string, number int) string {
 	if repoFullName == "" || number <= 0 {
 		return ""

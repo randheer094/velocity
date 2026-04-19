@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/randheer094/velocity/internal/config"
-	"github.com/randheer094/velocity/internal/data"
 )
 
 // Unset webhook secret env vars so tests default to HMAC-disabled.
@@ -744,26 +743,21 @@ func TestGithubHandlerWorkflowRunInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestGithubHandlerWorkflowRunNonJiraBranch(t *testing.T) {
+func TestGithubHandlerWorkflowRunNoPullRequests(t *testing.T) {
+	// PR-only gate: workflow_run without an associated PR is ignored
+	// regardless of branch shape.
+	cap := startCapturingQueue(t)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"feature/x"}}`)
+	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"PROJ-99","pull_requests":[]}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "workflow_run")
 	GithubHandler{}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d", rec.Code)
 	}
-}
-
-func TestGithubHandlerWorkflowRunUnknownBranch(t *testing.T) {
-	// No DB, so GetCodeTask returns nil — handler ignores.
-	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"PROJ-99"}}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
-	req.Header.Set("X-GitHub-Event", "workflow_run")
-	GithubHandler{}.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Errorf("status = %d", rec.Code)
+	time.Sleep(20 * time.Millisecond)
+	if len(cap.Names()) != 0 {
+		t.Errorf("expected no jobs, got %v", cap.Names())
 	}
 }
 
@@ -874,17 +868,12 @@ func TestStripLogTimestamp(t *testing.T) {
 
 func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
 	cap := startCapturingQueue(t)
-	oldTask := getCodeTaskByKey
-	getCodeTaskByKey = func(key string) *data.CodeTask {
-		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
-	}
-	defer func() { getCodeTaskByKey = oldTask }()
 	oldFetch := fetchWorkflowFailureSummary
 	fetchWorkflowFailureSummary = func(string, int64) string { return "error: boom" }
 	defer func() { fetchWorkflowFailureSummary = oldFetch }()
 
 	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"PROJ-5","html_url":"u"},"repository":{"full_name":"o/r"}}`)
+	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"feature/x","html_url":"u","pull_requests":[{"number":42}]},"repository":{"full_name":"o/r","clone_url":"https://github.com/o/r.git"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "workflow_run")
 	GithubHandler{}.ServeHTTP(rec, req)
@@ -893,7 +882,7 @@ func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
 	}
 	waitFor(t, func() bool {
 		for _, n := range cap.Names() {
-			if strings.HasPrefix(n, "code.Iterate:ci:PROJ-5") {
+			if strings.HasPrefix(n, "code.Iterate:ci:feature/x") {
 				return true
 			}
 		}
@@ -901,36 +890,14 @@ func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
 	})
 }
 
-func TestGithubHandlerWorkflowRunNotInReview(t *testing.T) {
-	oldTask := getCodeTaskByKey
-	getCodeTaskByKey = func(key string) *data.CodeTask {
-		return &data.CodeTask{IssueKey: key, Status: data.CodeCoding}
-	}
-	defer func() { getCodeTaskByKey = oldTask }()
-
-	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"PROJ-5"}}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
-	req.Header.Set("X-GitHub-Event", "workflow_run")
-	GithubHandler{}.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Errorf("status = %d", rec.Code)
-	}
-}
-
 func TestGithubHandlerIssueCommentHappyPath(t *testing.T) {
 	cap := startCapturingQueue(t)
 	oldLookup := lookupBranchForPR
-	lookupBranchForPR = func(string, int) string { return "PROJ-5" }
+	lookupBranchForPR = func(string, int) string { return "feature/x" }
 	defer func() { lookupBranchForPR = oldLookup }()
-	oldTask := getCodeTaskByKey
-	getCodeTaskByKey = func(key string) *data.CodeTask {
-		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
-	}
-	defer func() { getCodeTaskByKey = oldTask }()
 
 	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity tweak the docs"}}`)
+	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r","clone_url":"https://github.com/o/r.git"},"comment":{"body":"/velocity tweak the docs"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "issue_comment")
 	GithubHandler{}.ServeHTTP(rec, req)
@@ -939,7 +906,7 @@ func TestGithubHandlerIssueCommentHappyPath(t *testing.T) {
 	}
 	waitFor(t, func() bool {
 		for _, n := range cap.Names() {
-			if strings.HasPrefix(n, "code.Iterate:cmd:PROJ-5") {
+			if strings.HasPrefix(n, "code.Iterate:cmd:feature/x") {
 				return true
 			}
 		}
@@ -948,15 +915,7 @@ func TestGithubHandlerIssueCommentHappyPath(t *testing.T) {
 }
 
 func TestGithubHandlerIssueCommentEmptyAfterPrefix(t *testing.T) {
-	oldLookup := lookupBranchForPR
-	lookupBranchForPR = func(string, int) string { return "PROJ-5" }
-	defer func() { lookupBranchForPR = oldLookup }()
-	oldTask := getCodeTaskByKey
-	getCodeTaskByKey = func(key string) *data.CodeTask {
-		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
-	}
-	defer func() { getCodeTaskByKey = oldTask }()
-
+	cap := startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity   "}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
@@ -965,26 +924,34 @@ func TestGithubHandlerIssueCommentEmptyAfterPrefix(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d", rec.Code)
 	}
+	time.Sleep(20 * time.Millisecond)
+	if len(cap.Names()) != 0 {
+		t.Errorf("expected no jobs, got %v", cap.Names())
+	}
 }
 
 func TestGithubHandlerWorkflowRunStubbedSummary(t *testing.T) {
-	// Stub fetchWorkflowFailureSummary so the handler's code path that
-	// includes a non-empty summary + commit-hint derivation is exercised
-	// without needing the DB (handler still short-circuits at
-	// GetCodeTask==nil; we're covering the JSON-parse + branch-check
-	// branches and the helper wiring via the pure functions above).
+	cap := startCapturingQueue(t)
 	old := fetchWorkflowFailureSummary
 	fetchWorkflowFailureSummary = func(string, int64) string { return "error: sentinel" }
 	defer func() { fetchWorkflowFailureSummary = old }()
 
 	rec := httptest.NewRecorder()
-	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"PROJ-99","html_url":"u"},"repository":{"full_name":"o/r"}}`)
+	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"PROJ-99","html_url":"u","pull_requests":[{"number":3}]},"repository":{"full_name":"o/r"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
 	req.Header.Set("X-GitHub-Event", "workflow_run")
 	GithubHandler{}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d", rec.Code)
 	}
+	waitFor(t, func() bool {
+		for _, n := range cap.Names() {
+			if strings.HasPrefix(n, "code.Iterate:ci:PROJ-99") {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestFetchWorkflowFailureSummaryEmptyInputs(t *testing.T) {
@@ -996,13 +963,14 @@ func TestFetchWorkflowFailureSummaryEmptyInputs(t *testing.T) {
 	}
 }
 
-func TestGithubHandlerIssueCommentOutOfScope(t *testing.T) {
-	// No DB + no live GitHub — lookupBranchForPR returns "" and task is
-	// nil → handler replies via AddPRComment (network call is best-effort,
-	// we just exercise the branch).
+func TestGithubHandlerIssueCommentNoBranch(t *testing.T) {
+	// If GitHub returns no head branch for the PR (e.g. auth failure or
+	// deleted PR), the handler ignores the comment rather than
+	// enqueuing an iterate with an empty branch.
 	oldLookup := lookupBranchForPR
 	lookupBranchForPR = func(string, int) string { return "" }
 	defer func() { lookupBranchForPR = oldLookup }()
+	cap := startCapturingQueue(t)
 
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity help"}}`)
@@ -1011,5 +979,9 @@ func TestGithubHandlerIssueCommentOutOfScope(t *testing.T) {
 	GithubHandler{}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d", rec.Code)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if len(cap.Names()) != 0 {
+		t.Errorf("expected no jobs, got %v", cap.Names())
 	}
 }

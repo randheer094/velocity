@@ -52,10 +52,12 @@ type codeMarkMergedPayload struct {
 }
 
 type codeIteratePayload struct {
-	Branch string              `json:"branch"`
-	Reason code.IterateReason  `json:"reason"`
-	Extra  string              `json:"extra"`
-	Hint   string              `json:"hint"`
+	RepoURL string             `json:"repo_url"`
+	Branch  string             `json:"branch"`
+	PRURL   string             `json:"pr_url"`
+	Reason  code.IterateReason `json:"reason"`
+	Extra   string             `json:"extra"`
+	Hint    string             `json:"hint"`
 }
 
 // codeOnDismissedPayload carries ParentKey so the same dispatch branch
@@ -117,7 +119,7 @@ var dispatch = func(ctx context.Context, kind string, payload json.RawMessage) e
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return fmt.Errorf("%s: %w", kind, err)
 		}
-		code.Iterate(ctx, p.Branch, p.Reason, p.Extra, p.Hint)
+		code.Iterate(ctx, p.RepoURL, p.Branch, p.PRURL, p.Reason, p.Extra, p.Hint)
 		return nil
 
 	case KindCodeOnDismissed:

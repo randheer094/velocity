@@ -28,86 +28,82 @@ const (
 	IterateCommand IterateReason = "pr-command"
 )
 
-// Iterate updates an existing sub-task branch in place: fetch, reset
-// to origin, rebase onto default branch, run the LLM with extra
-// instruction, commit, and force-push-with-lease. The sub-task must
-// already be in_review and have a recorded PR URL.
+// Iterate refreshes an open PR branch on behalf of a GitHub event (CI
+// failure or `/velocity` comment). The PR does not need to have been
+// opened by velocity: iterate fresh-clones the repo, checks out
+// `branch`, and lets the LLM rebase onto the default branch, resolve
+// any conflicts, and apply the follow-up request before the runner
+// commits and force-pushes. If a velocity `code_tasks` row exists for
+// the branch, its title/description seed the prompt for context.
 //
 // extraInstruction is appended to the code prompt so the LLM has the
 // CI failure log or the user's /velocity command as fresh context.
 // commitHint becomes the trailing segment of the commit subject
-// ("<KEY>: <hint>") so merged history reads as something better than
-// generic "iterate". Empty hint falls back to "iterate".
-func Iterate(ctx context.Context, issueKey string, reason IterateReason, extraInstruction, commitHint string) {
-	if !claim(issueKey) {
-		slog.Info("code: iterate already in flight", "key", issueKey)
+// ("<branch>: <hint>"). Empty hint falls back to "iterate".
+func Iterate(ctx context.Context, repoURL, branch, prURL string, reason IterateReason, extraInstruction, commitHint string) {
+	if !claim(branch) {
+		slog.Info("code: iterate already in flight", "branch", branch)
 		return
 	}
-	defer release(issueKey)
+	defer release(branch)
 
 	runCtx, cancel := context.WithCancel(ctx)
-	registerCancel(issueKey, cancel)
+	registerCancel(branch, cancel)
 	defer func() {
-		unregisterCancel(issueKey)
+		unregisterCancel(branch)
 		cancel()
 	}()
 
 	stage := "init"
 	defer func() {
 		if r := recover(); r != nil {
-			reportIterateFailure(runCtx, issueKey, reason, "panic", fmt.Errorf("%v", r))
+			reportIterateFailure(branch, prURL, reason, "panic", fmt.Errorf("%v", r))
 		}
 	}()
 
-	if err := iterate(runCtx, issueKey, extraInstruction, commitHint, &stage); err != nil {
-		reportIterateFailure(runCtx, issueKey, reason, stage, err)
+	if err := iterate(runCtx, repoURL, branch, prURL, extraInstruction, commitHint, &stage); err != nil {
+		reportIterateFailure(branch, prURL, reason, stage, err)
 	}
 }
 
-func iterate(ctx context.Context, issueKey, extra, commitHint string, stage *string) error {
+func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint string, stage *string) error {
 	*stage = "load-config"
 	cfg := config.Get()
 	if cfg == nil {
 		return errors.New("config not loaded")
 	}
-
-	*stage = "load-task"
-	task, err := db.GetCodeTask(ctx, issueKey)
-	if err != nil {
-		return fmt.Errorf("load code task: %w", err)
+	if repoURL == "" {
+		return errors.New("empty repo url")
 	}
-	if task == nil {
-		return errors.New("no code task for key")
-	}
-	if task.Status != data.CodeInReview {
-		slog.Info("code: iterate ignored, task not in review", "key", issueKey, "status", task.Status)
-		return nil
+	if branch == "" {
+		return errors.New("empty branch")
 	}
 
 	*stage = "parse-repo-url"
-	repoFullName, err := parseRepoURL(task.RepoURL)
+	repoFullName, err := parseRepoURL(repoURL)
 	if err != nil {
 		return err
 	}
 
+	var title, description string
+	if task, _ := db.GetCodeTask(ctx, branch); task != nil {
+		title = task.Title
+		description = task.Description
+	}
+
 	*stage = "prepare-workspace"
-	workspace := config.WorkspacePath(issueKey)
-	if !git.WorkspaceExists(workspace) {
-		_ = os.RemoveAll(workspace)
-		if err := os.MkdirAll(config.WorkspaceDir, 0o755); err != nil {
-			return err
-		}
-		if err := git.Clone(task.RepoURL, workspace); err != nil {
-			return fmt.Errorf("clone: %w", err)
-		}
+	workspace := config.WorkspacePath(branch)
+	if err := os.RemoveAll(workspace); err != nil {
+		return fmt.Errorf("remove workspace: %w", err)
+	}
+	if err := os.MkdirAll(config.WorkspaceDir, 0o755); err != nil {
+		return err
+	}
+	if err := git.Clone(repoURL, workspace); err != nil {
+		return fmt.Errorf("clone: %w", err)
 	}
 	if err := configureAuthRemote(workspace, repoFullName); err != nil {
 		return fmt.Errorf("auth remote: %w", err)
-	}
-
-	*stage = "fetch"
-	if err := git.FetchAll(workspace); err != nil {
-		return fmt.Errorf("fetch: %w", err)
 	}
 
 	*stage = "default-branch"
@@ -117,69 +113,57 @@ func iterate(ctx context.Context, issueKey, extra, commitHint string, stage *str
 	}
 
 	*stage = "checkout-branch"
-	if err := git.CheckoutBranch(workspace, issueKey); err != nil {
-		if err := git.CheckoutNewBranch(workspace, issueKey); err != nil {
-			return fmt.Errorf("checkout: %w", err)
-		}
-	}
-
-	*stage = "sync-to-remote"
-	if err := git.ResetHardToRemote(workspace, issueKey); err != nil {
-		return fmt.Errorf("reset to remote branch: %w", err)
-	}
-
-	*stage = "rebase-main"
-	if err := git.RebaseOnto(workspace, baseBranch); err != nil {
-		return fmt.Errorf("rebase onto %s: %w", baseBranch, err)
+	if err := git.CheckoutBranch(workspace, branch); err != nil {
+		return fmt.Errorf("checkout %s: %w", branch, err)
 	}
 
 	*stage = "code-llm"
-	prompt := buildIteratePrompt(issueKey, task.Title, task.Description, extra)
+	prompt := buildIteratePrompt(branch, title, description, baseBranch, extra)
 	opts := llm.OptionsFromRoleConfig(cfg.LLM.Code, workspace)
 	if _, err := llm.RunPrompt(ctx, prompt, opts); err != nil {
 		return fmt.Errorf("code llm: %w", err)
 	}
 
 	*stage = "commit"
-	commitMsg := fmt.Sprintf("%s: iterate", issueKey)
+	commitMsg := fmt.Sprintf("%s: iterate", branch)
 	if h := strings.TrimSpace(commitHint); h != "" {
-		commitMsg = fmt.Sprintf("%s: %s", issueKey, h)
+		commitMsg = fmt.Sprintf("%s: %s", branch, h)
 	}
 	committed, err := git.AddAllAndCommit(workspace, commitMsg)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	if !committed {
-		// Rebase alone may have resolved things (common for CI fixes
-		// caused by a merge to main). Force-push the rebased branch.
-		slog.Info("code: iterate produced no edits; pushing rebased branch", "key", issueKey)
+		// The LLM may have committed its own edits (e.g. during rebase
+		// conflict resolution). Force-push the branch regardless.
+		slog.Info("code: iterate produced no uncommitted edits; pushing branch", "branch", branch)
 	}
 
 	*stage = "push"
-	if err := git.PushForceWithLease(workspace, issueKey); err != nil {
+	if err := git.PushForceWithLease(workspace, branch); err != nil {
 		return fmt.Errorf("push (force-with-lease): %w", err)
 	}
 
-	slog.Info("code: iterate pushed", "key", issueKey, "extra", truncate(extra, 80))
+	slog.Info("code: iterate pushed", "branch", branch, "extra", truncate(extra, 80))
 	return nil
 }
 
-func reportIterateFailure(ctx context.Context, issueKey string, reason IterateReason, stage string, err error) {
+func reportIterateFailure(branch, prURL string, reason IterateReason, stage string, err error) {
 	msg := redactAndTruncate(err.Error())
-	slog.Error("code: iterate failed", "key", issueKey, "stage", stage, "reason", reason, "err", err)
+	slog.Error("code: iterate failed", "branch", branch, "stage", stage, "reason", reason, "err", err)
 
-	if client := jira.Shared(); client != nil {
-		_ = client.CommentIssue(issueKey, fmt.Sprintf(
-			"Velocity iterate (%s) failed at stage *%s*.\n\n```\n%s\n```\n\nSee daemon.log for full details.",
-			reason, stage, msg,
-		))
+	// Jira comment only makes sense when the branch is a Jira issue key.
+	if data.ValidJiraKey(branch) {
+		if client := jira.Shared(); client != nil {
+			_ = client.CommentIssue(branch, fmt.Sprintf(
+				"Velocity iterate (%s) failed at stage *%s*.\n\n```\n%s\n```\n\nSee daemon.log for full details.",
+				reason, stage, msg,
+			))
+		}
 	}
 
-	// Best-effort PR comment so operators see the failure where they
-	// triggered it. Needs the PR URL from the DB row.
-	task, _ := db.GetCodeTask(ctx, issueKey)
-	if task != nil && task.PRURL != "" {
-		if repo, num := parsePRURL(task.PRURL); repo != "" && num > 0 {
+	if prURL != "" {
+		if repo, num := parsePRURL(prURL); repo != "" && num > 0 {
 			github.New().AddPRComment(repo, num,
 				fmt.Sprintf("Velocity could not complete the requested action (stage `%s`):\n\n```\n%s\n```",
 					stage, msg))

@@ -161,32 +161,45 @@ package cancel registry and wipes the workspace.
   `code_tasks` row with `jira_status` set to the dismiss alias.
   The parent's wave advances past it like a merged sub-task.
 
-## PR iteration (in_review only)
+## PR iteration
 
-Two GitHub events can trigger in-place updates on an open sub-task PR:
+Two GitHub events can trigger in-place updates on an open PR. The
+PR does **not** need to have been opened by velocity — any PR in a
+repo whose webhook points at velocity can be iterated on.
 
-- **CI failure** — `workflow_run` with `conclusion=failure`. Velocity
-  looks the branch up in `code_tasks`; if the sub-task is `IN_REVIEW`,
-  it re-uses the existing workspace, fetches, resets the branch to
-  `origin/<key>`, rebases onto the default branch, runs the code LLM
-  with the failure context, commits, and force-pushes with lease.
-  The failure context is pre-fetched: velocity calls the Actions
-  API for the run's failed jobs and inlines a trimmed tail of each
-  job's log into the prompt (no network needed from the LLM
-  sandbox). The commit subject is derived from the first error
-  line in the log (`<KEY>: fix CI: <error>`). Unknown branches and
-  non-`IN_REVIEW` statuses are ignored.
+- **CI failure** — `workflow_run` with `conclusion=failure` and a
+  non-empty `pull_requests` array (the PR-only gate; runs from
+  pushes to the default branch are ignored). Velocity pre-fetches
+  a trimmed tail of each failed job's log via the Actions API and
+  inlines it into the prompt so the LLM has the failure context
+  without needing network access from its sandbox. The commit
+  subject is derived from the first error line in the log
+  (`<branch>: fix CI: <error>`).
 - **`/velocity <instruction>` comment** — `issue_comment` with
-  `action=created` on a PR. If the branch has no `code_tasks` row or
-  the row is not `IN_REVIEW`, velocity posts `Cannot perform any
-  action on this` to the PR and stops. Otherwise it runs the same
-  fetch → rebase → LLM → force-push loop with the user instruction as
-  context.
+  `action=created` on a PR. Empty instructions get a usage reply on
+  the PR. The comment prefix `/velocity` is required; anything else
+  is ignored.
 
-Iteration keeps the sub-task in `IN_REVIEW`; it never transitions to
-`CODING_FAILED`. Iterate failures are logged, commented on Jira, and
-commented on the PR; operators retry by posting another `/velocity`
-comment.
+Both triggers enqueue `code.Iterate` with the repo clone URL, head
+branch, and PR URL carried from the webhook payload. Iterate then:
+
+1. Removes any prior workspace and fresh-clones the repo.
+2. Checks out the PR branch.
+3. Runs the code LLM, which is prompted to **first rebase onto the
+   default branch, resolving any conflicts**, then apply the
+   follow-up request (CI failure summary or user instruction).
+4. Commits any remaining uncommitted edits and force-pushes the
+   branch with lease.
+
+If a velocity `code_tasks` row exists for the branch, its title and
+description seed the prompt for additional context; the row is not
+required.
+
+Iterate failures are logged, posted to the PR as a comment, and —
+when the branch is a valid Jira issue key — also posted to the Jira
+issue. Velocity never transitions a PR's status on iterate failure.
+Operators retry by posting another `/velocity` comment or by
+re-running the failing CI check.
 
 ## Dispatch
 
@@ -237,8 +250,8 @@ handler ──► webhook.Enqueue(kind, name, payload)
 | Sub-task transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `code.OnDismissed` + `arch.AdvanceWave` |
 | Parent transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `arch.OnDismissed` |
 | PR merged | `POST /webhook/github` → `webhook.Enqueue` → `code.MarkMerged` |
-| CI failed on a sub-task PR (IN_REVIEW) | `POST /webhook/github` (`workflow_run`) → `webhook.Enqueue` → `code.Iterate` |
-| `/velocity` comment on a sub-task PR (IN_REVIEW) | `POST /webhook/github` (`issue_comment`) → `webhook.Enqueue` → `code.Iterate` |
+| CI failed on any PR | `POST /webhook/github` (`workflow_run` with `pull_requests`) → `webhook.Enqueue` → `code.Iterate` |
+| `/velocity` comment on any PR | `POST /webhook/github` (`issue_comment`) → `webhook.Enqueue` → `code.Iterate` |
 
 All cross-component communication — including arch→code — goes via
 Jira (assignment, transition) or GitHub (PR events). Never via

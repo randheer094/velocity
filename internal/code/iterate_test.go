@@ -16,8 +16,8 @@ func removeWorkspaceForKey(key string) error {
 }
 
 func TestBuildIteratePromptContainsExtra(t *testing.T) {
-	got := buildIteratePrompt("PROJ-1", "title", "desc", "fix the flaky CI")
-	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI"} {
+	got := buildIteratePrompt("PROJ-1", "title", "desc", "main", "fix the flaky CI")
+	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI", `"main"`, "rebase"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q: %s", want, got)
 		}
@@ -59,93 +59,97 @@ func TestIterateDuplicateClaim(t *testing.T) {
 		t.Fatal("first claim should succeed")
 	}
 	defer release("ITER-DUP")
-	Iterate(context.Background(), "ITER-DUP", IterateCI, "x", "")
+	Iterate(context.Background(), "https://github.com/o/r.git", "ITER-DUP", "https://github.com/o/r/pull/1", IterateCI, "x", "")
 }
 
-func TestIterateNoTask(t *testing.T) {
+func TestIterateEmptyRepoURL(t *testing.T) {
 	requireDB(t)
-	// No row in DB → iterate() returns "no code task" error; deferred
-	// reporter runs without panicking.
-	Iterate(context.Background(), "ITER-NONE", IterateCI, "x", "")
+	// Empty repo URL → iterate() returns error; deferred reporter runs
+	// without panicking.
+	Iterate(context.Background(), "", "ITER-NONE", "", IterateCI, "x", "")
 }
 
-func TestIterateSkipsWhenNotInReview(t *testing.T) {
+// TestIterateNoTaskRowStillRuns verifies iterate proceeds even when
+// no code_tasks row exists for the branch (i.e. the PR was not opened
+// by velocity). It will still fail at a later stage — we just assert
+// it doesn't short-circuit on the missing row.
+func TestIterateNoTaskRowStillRuns(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
+	cleanCodeTask(t, "ITER-NO-ROW")
+	// Bad repo URL → fails at parseRepoURL, which is after the
+	// (removed) task lookup; proves the lookup isn't a gate anymore.
+	Iterate(ctx, "not-a-url", "ITER-NO-ROW", "https://github.com/o/r/pull/1", IterateCommand, "do something", "")
+}
+
+func TestIterateIgnoresTaskStatus(t *testing.T) {
+	requireDB(t)
+	ctx := context.Background()
+	// Task exists but is DONE — iterate must no longer skip it, but
+	// the bad repo URL fails it at parse stage so the DB row is
+	// preserved.
 	task := &data.CodeTask{
-		IssueKey:      "ITER-NOT-IR",
+		IssueKey:      "ITER-DONE",
 		ParentJiraKey: "P-1",
 		RepoURL:       "https://x",
 		Title:         "x",
-		Branch:        "ITER-NOT-IR",
+		Branch:        "ITER-DONE",
 		Status:        data.CodeDone,
 	}
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	Iterate(ctx, "ITER-NOT-IR", IterateCI, "x", "")
-	got, _ := db.GetCodeTask(ctx, "ITER-NOT-IR")
+	Iterate(ctx, "not-a-url", "ITER-DONE", "https://github.com/o/r/pull/1", IterateCI, "x", "")
+	got, _ := db.GetCodeTask(ctx, "ITER-DONE")
 	if got.Status != data.CodeDone {
 		t.Errorf("status changed: %q", got.Status)
 	}
 }
 
+// TestIterateBadRepoURL uses a valid-looking Jira key so the failure
+// reporter exercises both the Jira-comment and PR-comment paths.
 func TestIterateBadRepoURL(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	task := &data.CodeTask{
-		IssueKey:      "ITER-BAD-URL",
-		ParentJiraKey: "P-1",
-		RepoURL:       "not-a-url",
-		Title:         "x",
-		Branch:        "ITER-BAD-URL",
-		PRURL:         "https://github.com/o/r/pull/1",
-		Status:        data.CodeInReview,
-	}
-	if err := db.SaveCodeTask(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	Iterate(ctx, "ITER-BAD-URL", IterateCommand, "do something", "")
-	// Failure reporter ran; status should remain in_review.
-	got, _ := db.GetCodeTask(ctx, "ITER-BAD-URL")
-	if got.Status != data.CodeInReview {
-		t.Errorf("status changed: %q", got.Status)
-	}
+	Iterate(ctx, "not-a-url", "ITER-1", "https://github.com/o/r/pull/1", IterateCommand, "do something", "")
+}
+
+// TestIterateBadRepoURLNonJiraBranch covers the failure path for a
+// branch that is not a Jira key — only the PR-comment surface fires,
+// the Jira-comment branch is skipped.
+func TestIterateBadRepoURLNonJiraBranch(t *testing.T) {
+	requireDB(t)
+	ctx := context.Background()
+	Iterate(ctx, "not-a-url", "feature/not-a-jira-key", "https://github.com/o/r/pull/1", IterateCommand, "do something", "")
 }
 
 func TestIterateFullHappyPath(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	// DB persists across test-db.sh runs; force a fresh task state so
-	// Run() re-clones instead of short-circuiting on a prior in_review.
 	_ = db.MarkCodeFailed(ctx, "ITER-OK", "", "", "", "", "", "", "")
 	remote := setupBareRemote(t)
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { return "owner/repo", nil }
 	defer func() { parseRepoURL = prev }()
 
-	// Prime by running code.Run end-to-end so the workspace + branch + PR
-	// row land in the normal shape.
+	// Prime by running code.Run end-to-end so a branch + task row land
+	// in the normal shape — iterate can consult the row for prompt
+	// context even though it doesn't require one.
 	Run(ctx, "ITER-OK", "P-1", remote, "implement", "desc")
 	got, _ := db.GetCodeTask(ctx, "ITER-OK")
 	if got == nil || got.Status != data.CodeInReview {
 		t.Fatalf("setup failed: %+v", got)
 	}
 
-	// Now iterate. LLM stub writes implementation.go again, which is a
-	// no-op on an unchanged tree — Iterate treats that as OK and still
-	// force-pushes the rebased branch.
-	Iterate(ctx, "ITER-OK", IterateCommand, "add more stuff", "add more stuff")
-	after, _ := db.GetCodeTask(ctx, "ITER-OK")
-	if after.Status != data.CodeInReview {
-		t.Errorf("status should remain in_review: %q", after.Status)
-	}
+	// Fresh checkout: iterate always re-clones before running.
+	Iterate(ctx, remote, "ITER-OK", got.PRURL, IterateCommand, "add more stuff", "add more stuff")
 }
 
-func TestIterateReclonesMissingWorkspace(t *testing.T) {
+// TestIterateFreshCheckoutOverExisting verifies iterate removes and
+// re-clones even when a previous workspace exists on disk.
+func TestIterateFreshCheckoutOverExisting(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	// Prime + Run to push branch upstream.
 	_ = db.MarkCodeFailed(ctx, "ITER-RECLONE", "", "", "", "", "", "", "")
 	remote := setupBareRemote(t)
 	prev := parseRepoURL
@@ -158,101 +162,45 @@ func TestIterateReclonesMissingWorkspace(t *testing.T) {
 		t.Fatalf("setup: %+v", got)
 	}
 
-	// Blow away the workspace so iterate has to re-clone.
-	if err := removeWorkspaceForKey("ITER-RECLONE"); err != nil {
+	// Leave the workspace in place; iterate must clear it and clone
+	// fresh on its own.
+	ws := config.WorkspacePath("ITER-RECLONE")
+	if _, err := os.Stat(ws); err != nil {
+		t.Fatalf("workspace should still exist after Run: %v", err)
+	}
+	sentinel := ws + "/leftover.txt"
+	if err := os.WriteFile(sentinel, []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	Iterate(ctx, "ITER-RECLONE", IterateCI, "ci failed, please fix", "fix CI: test failed")
-	after, _ := db.GetCodeTask(ctx, "ITER-RECLONE")
-	if after.Status != data.CodeInReview {
-		t.Errorf("status = %q", after.Status)
+	Iterate(ctx, remote, "ITER-RECLONE", got.PRURL, IterateCI, "ci failed, please fix", "fix CI: test failed")
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("leftover file survived fresh checkout: %v", err)
 	}
 }
 
 func TestIterateCloneFails(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	// Seed a task pointing at a non-existent repo, with no workspace
-	// on disk → iterate tries to clone and fails at the clone stage.
-	task := &data.CodeTask{
-		IssueKey:      "ITER-CLONE-FAIL",
-		ParentJiraKey: "P-1",
-		RepoURL:       "/nonexistent/repo.git",
-		Title:         "x",
-		Branch:        "ITER-CLONE-FAIL",
-		Status:        data.CodeInReview,
-	}
-	if err := db.SaveCodeTask(ctx, task); err != nil {
-		t.Fatal(err)
-	}
 	_ = removeWorkspaceForKey("ITER-CLONE-FAIL")
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { return "o/r", nil }
 	defer func() { parseRepoURL = prev }()
-	Iterate(ctx, "ITER-CLONE-FAIL", IterateCI, "fix me", "")
-}
-
-func TestIterateFetchFailsOnBrokenWorkspace(t *testing.T) {
-	requireDB(t)
-	ctx := context.Background()
-	task := &data.CodeTask{
-		IssueKey:      "ITER-FETCH-FAIL",
-		ParentJiraKey: "P-1",
-		RepoURL:       "https://github.com/o/r.git",
-		Title:         "x",
-		Branch:        "ITER-FETCH-FAIL",
-		Status:        data.CodeInReview,
-	}
-	if err := db.SaveCodeTask(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	// Create a workspace dir with a .git subdir so WorkspaceExists
-	// returns true, but no remote — FetchAll will error.
-	ws := config.WorkspacePath("ITER-FETCH-FAIL")
-	_ = os.RemoveAll(ws)
-	if err := os.MkdirAll(ws+"/.git", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(ws) })
-	prev := parseRepoURL
-	parseRepoURL = func(string) (string, error) { return "o/r", nil }
-	defer func() { parseRepoURL = prev }()
-	prevAuth := configureAuthRemote
-	configureAuthRemote = func(string, string) error { return nil }
-	defer func() { configureAuthRemote = prevAuth }()
-	Iterate(ctx, "ITER-FETCH-FAIL", IterateCI, "fix me", "")
+	Iterate(ctx, "/nonexistent/repo.git", "ITER-CLONE-FAIL", "https://github.com/o/r/pull/1", IterateCI, "fix me", "")
 }
 
 func TestIterateAuthRemoteFails(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	task := &data.CodeTask{
-		IssueKey:      "ITER-AUTH-FAIL",
-		ParentJiraKey: "P-1",
-		RepoURL:       "https://github.com/o/r.git",
-		Title:         "x",
-		Branch:        "ITER-AUTH-FAIL",
-		Status:        data.CodeInReview,
-	}
-	if err := db.SaveCodeTask(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	ws := config.WorkspacePath("ITER-AUTH-FAIL")
-	_ = os.RemoveAll(ws)
-	if err := os.MkdirAll(ws+"/.git", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(ws) })
+	remote := setupBareRemote(t)
+	_ = removeWorkspaceForKey("ITER-AUTH-FAIL")
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { return "o/r", nil }
 	defer func() { parseRepoURL = prev }()
 	prevAuth := configureAuthRemote
-	configureAuthRemote = func(string, string) error {
-		return errTestAuth
-	}
+	configureAuthRemote = func(string, string) error { return errTestAuth }
 	defer func() { configureAuthRemote = prevAuth }()
-	Iterate(ctx, "ITER-AUTH-FAIL", IterateCI, "fix", "")
+	Iterate(ctx, remote, "ITER-AUTH-FAIL", "https://github.com/o/r/pull/1", IterateCI, "fix", "")
 }
 
 var errTestAuth = &stringErr{"auth failed"}
@@ -261,79 +209,11 @@ type stringErr struct{ s string }
 
 func (e *stringErr) Error() string { return e.s }
 
-// TestIterateRebaseConflictAborts covers the "rebase-main" error
-// return by setting up a branch whose change conflicts with a later
-// push to main, forcing git rebase to abort.
-func TestIterateRebaseConflictAborts(t *testing.T) {
-	requireDB(t)
-	ctx := context.Background()
-	_ = db.MarkCodeFailed(ctx, "ITER-REBASE", "", "", "", "", "", "", "")
-	remote := setupBareRemote(t)
-	prev := parseRepoURL
-	parseRepoURL = func(string) (string, error) { return "owner/repo", nil }
-	defer func() { parseRepoURL = prev }()
-
-	Run(ctx, "ITER-REBASE", "P-1", remote, "impl", "desc")
-	got, _ := db.GetCodeTask(ctx, "ITER-REBASE")
-	if got == nil || got.Status != data.CodeInReview {
-		t.Fatalf("setup: %+v", got)
-	}
-
-	// Push a conflicting edit to main from a second clone so rebase
-	// will fail.
-	other := t.TempDir() + "/other"
-	c := osExec("git", "clone", remote, other)
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
-	writeAndCommit(t, other, "implementation.go", "conflict-from-main", "main edit")
-	c = osExec("git", "-C", other, "push", "origin", "main")
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Fatalf("push main: %v\n%s", err, out)
-	}
-
-	Iterate(ctx, "ITER-REBASE", IterateCI, "fix", "")
-	// Iterate failed mid-way; DB status stays in_review.
-	after, _ := db.GetCodeTask(ctx, "ITER-REBASE")
-	if after.Status != data.CodeInReview {
-		t.Errorf("status = %q", after.Status)
-	}
-}
-
-func writeAndCommit(t *testing.T, repoDir, name, contents, msg string) {
-	t.Helper()
-	if err := os.WriteFile(repoDir+"/"+name, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"-C", repoDir, "config", "user.email", "t@t"},
-		{"-C", repoDir, "config", "user.name", "t"},
-		{"-C", repoDir, "add", "."},
-		{"-C", repoDir, "commit", "-m", msg},
-	} {
-		c := osExec("git", args...)
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-}
-
 func TestIteratePanicRecovered(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	task := &data.CodeTask{
-		IssueKey:      "ITER-PANIC",
-		ParentJiraKey: "P-1",
-		RepoURL:       "https://x",
-		Title:         "x",
-		Branch:        "ITER-PANIC",
-		Status:        data.CodeInReview,
-	}
-	if err := db.SaveCodeTask(ctx, task); err != nil {
-		t.Fatal(err)
-	}
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { panic("boom") }
 	defer func() { parseRepoURL = prev }()
-	Iterate(ctx, "ITER-PANIC", IterateCI, "x", "")
+	Iterate(ctx, "https://github.com/o/r.git", "ITER-PANIC", "https://github.com/o/r/pull/1", IterateCI, "x", "")
 }

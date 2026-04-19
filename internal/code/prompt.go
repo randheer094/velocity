@@ -28,19 +28,28 @@ Description:
 }
 
 const iterateSystemPrompt = `You are a senior software engineer iterating on an open pull request.
-The working directory is the repo root, the PR's branch is checked out,
-and it has just been rebased onto the default branch. Make focused
-edits to satisfy the request below.
+The working directory is the repo root on a fresh clone, with the PR's
+branch checked out.
+
+Workflow:
+1. First, rebase this branch onto the base branch %q and resolve any
+   merge conflicts that arise. Stage resolved files and run
+   'git rebase --continue' until the rebase completes. Leave any
+   commits produced by conflict resolution in place — the runner will
+   force-push the branch.
+2. Then make focused edits to satisfy the follow-up request below.
 
 Constraints:
-- Stay inside the scope of the original sub-task plus the request.
+- Stay inside the scope of the request (plus the original sub-task, if
+  any context is provided).
 - Do not refactor unrelated code.
 - Follow the existing code style of the repository.
-- Do not commit or push — another tool will do that after you finish.
+- Do not push — another tool force-pushes after you finish.
+- Any uncommitted edits left at the end will be committed by the runner.
 - When you are done, print a short summary of what you changed on the
   last line of your output.`
 
-func buildIteratePrompt(issueKey, title, description, extra string) string {
+func buildIteratePrompt(issueKey, title, description, baseBranch, extra string) string {
 	return fmt.Sprintf(`%s
 
 ---
@@ -53,7 +62,7 @@ Original description:
 
 Follow-up request:
 %s
-`, iterateSystemPrompt, issueKey, title, description, extra)
+`, fmt.Sprintf(iterateSystemPrompt, baseBranch), issueKey, title, description, extra)
 }
 
 // BuildPRBody returns a GitHub PR description for one sub-task.
