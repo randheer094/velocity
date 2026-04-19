@@ -79,6 +79,28 @@ go build -o velocity ./cmd/velocity
 
 ## Install
 
+### From a release (recommended)
+
+Grab the latest macOS binary and drop it in `~/.local/bin`:
+
+```bash
+mkdir -p ~/.local/bin
+
+# Apple Silicon (arm64)
+curl -L -o ~/.local/bin/velocity \
+  https://github.com/randheer094/velocity/releases/latest/download/velocity-macos-arm64
+
+# Intel Mac (x86_64)
+curl -L -o ~/.local/bin/velocity \
+  https://github.com/randheer094/velocity/releases/latest/download/velocity-macos-x86_64
+
+chmod +x ~/.local/bin/velocity
+```
+
+Make sure `~/.local/bin` is on `PATH`.
+
+### From source
+
 ```bash
 make install        # build + move to $INSTALL_DIR (default ~/.local/bin)
 ```
