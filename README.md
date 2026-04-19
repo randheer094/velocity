@@ -27,25 +27,26 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
 ## Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Build](#build)
-3. [Install](#install)
-4. [Configure](#configure)
-5. [Postgres](#postgres)
-6. [Run the daemon](#run-the-daemon)
-7. [Commands](#commands)
-8. [Configuration reference](#configuration-reference)
-9. [Webhook configuration](#webhook-configuration)
-10. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
-11. [Files on disk](#files-on-disk)
-12. [Dependency tracking](#dependency-tracking)
-13. [Test](#test)
-14. [Deploy](#deploy)
-15. [Troubleshooting](#troubleshooting)
+2. [Install](#install)
+3. [Configure](#configure)
+4. [Postgres](#postgres)
+5. [Run the daemon](#run-the-daemon)
+6. [Commands](#commands)
+7. [Configuration reference](#configuration-reference)
+8. [Webhook configuration](#webhook-configuration)
+9. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
+10. [Files on disk](#files-on-disk)
+11. [Dependency tracking](#dependency-tracking)
+12. [Test](#test)
+13. [Deploy](#deploy)
+14. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
-- macOS 12+ or Linux (x86_64 / arm64).
-- [Go 1.24+](https://go.dev/dl/) and `make` (for building).
+- macOS 12+ (arm64 or x86_64). Prebuilt release binaries ship only
+  for macOS; other platforms need to build from source.
+- [Go 1.24+](https://go.dev/dl/) and `make` — only required to build
+  from source.
 - [Docker](https://www.docker.com/) (for local Postgres via
   `compose.yml`) or any reachable Postgres 14+ instance.
 - The [Claude CLI](https://claude.com/claude-code) on `PATH`, logged
@@ -63,23 +64,35 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
   default (override in `config.yaml`). For local development, tunnel
   via `ngrok`, `cloudflared`, or `tailscale funnel`.
 
-## Build
+## Install
+
+Both paths land the `velocity` binary in `~/.local/bin`. Make sure
+that directory is on `PATH`.
+
+### From a release (recommended)
+
+Pick the asset for your Mac and `curl` it straight into
+`~/.local/bin`:
+
+```bash
+mkdir -p ~/.local/bin
+
+# Apple Silicon (arm64)
+curl -L -o ~/.local/bin/velocity \
+  https://github.com/randheer094/velocity/releases/latest/download/velocity-macos-arm64
+
+# Intel Mac (x86_64)
+curl -L -o ~/.local/bin/velocity \
+  https://github.com/randheer094/velocity/releases/latest/download/velocity-macos-x86_64
+
+chmod +x ~/.local/bin/velocity
+```
+
+### From source
 
 ```bash
 git clone https://github.com/randheer094/velocity.git
 cd velocity
-make build          # produces ./velocity (stripped)
-```
-
-Or straight `go build`:
-
-```bash
-go build -o velocity ./cmd/velocity
-```
-
-## Install
-
-```bash
 make install        # build + move to $INSTALL_DIR (default ~/.local/bin)
 ```
 
@@ -89,7 +102,8 @@ Override the install location:
 make install INSTALL_DIR=/usr/local/bin
 ```
 
-Make sure the destination is on `PATH`.
+To build without installing (e.g. for local testing), use
+`make build` — produces `./velocity` in the repo root.
 
 ## Configure
 
