@@ -23,40 +23,48 @@ var (
 	dataOK bool
 )
 
-// Start opens the pool against the DB named in cfg (host + password
-// from DBHostEnv / DBPasswordEnv) and runs any unapplied migrations.
-// Safe to call twice — the second call is a no-op.
-func Start(ctx context.Context, cfg config.DatabaseConfig) error {
+// Start opens the pool against the external Postgres. All connection
+// fields come from env vars (DBHostEnv / DBPortEnv / DBUserEnv /
+// DBPasswordEnv / DBNameEnv). sslmode is always `disable`. Safe to
+// call twice — the second call is a no-op.
+func Start(ctx context.Context) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if dataOK {
 		return nil
 	}
 
-	host := os.Getenv(config.DBHostEnv)
-	if host == "" {
-		return fmt.Errorf("%s must be exported", config.DBHostEnv)
+	host, err := requireEnv(config.DBHostEnv)
+	if err != nil {
+		return err
 	}
-	password := os.Getenv(config.DBPasswordEnv)
-	if password == "" {
-		return fmt.Errorf("%s must be exported", config.DBPasswordEnv)
+	user, err := requireEnv(config.DBUserEnv)
+	if err != nil {
+		return err
 	}
-
-	port := cfg.Port
-	if v := os.Getenv(config.DBPortEnv); v != "" {
-		p, err := strconv.Atoi(v)
-		if err != nil || p <= 0 || p > 65535 {
-			return fmt.Errorf("%s is not a valid port: %q", config.DBPortEnv, v)
-		}
-		port = p
+	password, err := requireEnv(config.DBPasswordEnv)
+	if err != nil {
+		return err
+	}
+	name, err := requireEnv(config.DBNameEnv)
+	if err != nil {
+		return err
+	}
+	portStr, err := requireEnv(config.DBPortEnv)
+	if err != nil {
+		return err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return fmt.Errorf("%s is not a valid port: %q", config.DBPortEnv, portStr)
 	}
 
 	dsn := (&url.URL{
 		Scheme:   "postgres",
-		User:     url.UserPassword(cfg.User, password),
+		User:     url.UserPassword(user, password),
 		Host:     fmt.Sprintf("%s:%d", host, port),
-		Path:     "/" + cfg.Name,
-		RawQuery: "sslmode=" + url.QueryEscape(cfg.SSLMode),
+		Path:     "/" + name,
+		RawQuery: "sslmode=disable",
 	}).String()
 
 	poolCfg, err := pgxpool.ParseConfig(dsn)
@@ -110,3 +118,11 @@ func Shared() *pgxpool.Pool {
 
 // ErrNotStarted means a repo call was made before Start.
 var ErrNotStarted = errors.New("db: not started")
+
+func requireEnv(name string) (string, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return "", fmt.Errorf("%s must be exported", name)
+	}
+	return v, nil
+}

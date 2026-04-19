@@ -34,5 +34,7 @@ fi
 echo ">>> running tests"
 VELOCITY_DB_HOST=127.0.0.1 \
 VELOCITY_DB_PORT=55432 \
+VELOCITY_DB_USER=velocity \
 VELOCITY_DB_PASSWORD=velocity \
+VELOCITY_DB_NAME=velocity \
   go test "${@:-./...}"

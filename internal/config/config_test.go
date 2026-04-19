@@ -90,9 +90,6 @@ func TestApplyDefaults(t *testing.T) {
 	if c.Server.MaxConcurrency != 1 || c.Server.QueueSize != 1024 {
 		t.Errorf("default server queue wrong: %+v", c.Server)
 	}
-	if c.LogLevel != "INFO" {
-		t.Errorf("default log level wrong: %q", c.LogLevel)
-	}
 
 	// Existing values not overwritten
 	c2 := &Config{
@@ -101,8 +98,7 @@ func TestApplyDefaults(t *testing.T) {
 			Arch: LLMRoleConfig{Provider: "X", Model: "M", AllowedTools: "T", PermissionMode: "P", TimeoutSec: 5},
 			Code: LLMRoleConfig{Provider: "Y", Model: "N", AllowedTools: "U", PermissionMode: "Q", TimeoutSec: 7},
 		},
-		Server:   ServerConfig{Host: "h", Port: 9, MaxConcurrency: 4, QueueSize: 16},
-		LogLevel: "DEBUG",
+		Server: ServerConfig{Host: "h", Port: 9, MaxConcurrency: 4, QueueSize: 16},
 	}
 	c2.applyDefaults()
 	if c2.LLM.Arch.Provider != "X" || c2.LLM.Code.Provider != "Y" {

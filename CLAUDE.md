@@ -15,8 +15,8 @@ in [WORKFLOW.md](./WORKFLOW.md). Don't duplicate them here.
 2. **Two agents, one manager.** `arch` plans and manages waves; `code` executes one sub-task. `code` must not import `arch`; `arch` must not import `code`.
 3. **Shared libraries stay agent-agnostic.** No webhook handlers, no CLI imports, no cross-agent knowledge in `internal/{config,jira,github,git,llm,status,data,db}`.
 4. **Jira issue keys are IDs.** DB rows, workspaces, git branches, PR titles all key off the issue key directly. Sub-task branch ≡ sub-task key.
-5. **External Postgres; workspaces ephemeral.** DB is operator-provided via `VELOCITY_DB_HOST` / `VELOCITY_DB_PASSWORD` (optional `VELOCITY_DB_PORT`); clones under `~/.velocity/workspace/<KEY>/`. Schema evolves via forward-only numbered migrations in `internal/db/migrations/` — never edit a shipped migration.
-6. **Config is YAML; secrets are env vars.** One `config.yaml` (operator-written; see `config.example.yaml`). Secrets (`JIRA_API_TOKEN`, `GH_TOKEN`, `JIRA_WEBHOOK_SECRET`, `GH_WEBHOOK_SECRET`, `VELOCITY_DB_HOST`, `VELOCITY_DB_PASSWORD`) come from the environment. No setup command, no runtime config reload.
+5. **External Postgres; workspaces ephemeral.** Every DB connection field (`VELOCITY_DB_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_NAME`) comes from env; `sslmode` is hardcoded `disable`. Clones under `~/.velocity/workspace/<KEY>/`. Schema evolves via forward-only numbered migrations in `internal/db/migrations/` — never edit a shipped migration.
+6. **Config is YAML; secrets are env vars.** One `config.yaml` (operator-written; see `config.example.yaml`) for Jira, LLM, and server tuning. Everything else (API tokens, webhook secrets, all Postgres fields) is env. No setup command, no runtime config reload.
 7. **FIFO dispatch with parallel cap.** Handlers enqueue and return 202; workers drain the queue.
 8. **Failures are first-class states.** `PLANNING FAILED`, `DEV FAILED` (`code_failed`), `DISMISSED` are real statuses. Retry = re-assign; dismiss is terminal.
 

@@ -1,10 +1,11 @@
 # velocity config.example.yaml
 #
 # Copy to ~/.velocity/config.yaml (or <--dir>/config.yaml) and edit.
-# Secrets never live here — export them via env vars:
+# Secrets and the full Postgres connection live in env vars, never here:
 #   JIRA_API_TOKEN, GH_TOKEN,
 #   JIRA_WEBHOOK_SECRET, GH_WEBHOOK_SECRET,
-#   VELOCITY_DB_HOST, VELOCITY_DB_PASSWORD
+#   VELOCITY_DB_HOST, VELOCITY_DB_PORT, VELOCITY_DB_USER,
+#   VELOCITY_DB_PASSWORD, VELOCITY_DB_NAME
 
 jira:
   base_url: https://your-org.atlassian.net
@@ -58,11 +59,3 @@ server:
   port: 8000
   max_concurrency: 1
   queue_size: 1024
-
-database:
-  port: 5432
-  user: velocity
-  name: velocity
-  sslmode: disable
-
-log_level: INFO

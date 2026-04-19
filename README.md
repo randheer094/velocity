@@ -115,8 +115,10 @@ Secrets are **never** in `config.yaml` — export them before
 | `JIRA_API_TOKEN` | yes | Jira REST API auth (basic auth, paired with `jira.email`). |
 | `GH_TOKEN` | yes | GitHub REST API + `git push` auth (repo scope). |
 | `VELOCITY_DB_HOST` | yes | Postgres host (e.g. `127.0.0.1`). |
+| `VELOCITY_DB_PORT` | yes | Postgres port. |
+| `VELOCITY_DB_USER` | yes | Postgres user. |
 | `VELOCITY_DB_PASSWORD` | yes | Postgres password. |
-| `VELOCITY_DB_PORT` | no | Override `database.port` from `config.yaml`. |
+| `VELOCITY_DB_NAME` | yes | Postgres database name. |
 | `JIRA_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature`. Unset disables verification (dev only). |
 | `GH_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature-256`. Unset disables verification (dev only). |
 
@@ -126,7 +128,10 @@ Example:
 export JIRA_API_TOKEN="..."
 export GH_TOKEN="ghp_..."
 export VELOCITY_DB_HOST="127.0.0.1"
+export VELOCITY_DB_PORT="5432"
+export VELOCITY_DB_USER="velocity"
 export VELOCITY_DB_PASSWORD="velocity"
+export VELOCITY_DB_NAME="velocity"
 export JIRA_WEBHOOK_SECRET="..."
 export GH_WEBHOOK_SECRET="..."
 velocity start
@@ -135,10 +140,9 @@ velocity start
 ## Postgres
 
 Velocity does **not** manage its own database. Provide any Postgres
-14+ instance and point velocity at it via
-`VELOCITY_DB_HOST` / `VELOCITY_DB_PASSWORD` (and optionally
-`VELOCITY_DB_PORT`). The other fields (`user`, `name`, `sslmode`,
-`port`) live in `config.yaml` under `database`.
+14+ instance and point velocity at it via the `VELOCITY_DB_*` env
+vars above. `sslmode` is always `disable` — put a TLS-terminating
+proxy in front of Postgres if you need encryption.
 
 ### Local development
 
@@ -156,7 +160,9 @@ Data persists in `./.pgdata/` (gitignored). Matching env vars:
 ```bash
 export VELOCITY_DB_HOST=127.0.0.1
 export VELOCITY_DB_PORT=55432
+export VELOCITY_DB_USER=velocity
 export VELOCITY_DB_PASSWORD=velocity
+export VELOCITY_DB_NAME=velocity
 ```
 
 ### Schema migrations
@@ -208,12 +214,6 @@ server:
   max_concurrency: 1       # workers draining the FIFO queue (default 1 = strict serial)
   queue_size: 1024         # enqueue buffer; overflow is dropped + logged
 
-database:
-  port: 5432               # overridden by VELOCITY_DB_PORT if set
-  user: velocity
-  name: velocity
-  sslmode: disable
-
 jira:
   base_url: https://acme.atlassian.net
   email: velocity-bot@acme.com
@@ -248,8 +248,6 @@ llm:
     allowed_tools: Read Write Edit Glob Grep LS MultiEdit Bash
     permission_mode: bypassPermissions
     timeout_sec: 1800
-
-log_level: INFO
 ```
 
 ### Status buckets
@@ -366,10 +364,10 @@ make test-e2e   # boots ./compose.yml postgres, runs `go test ./...`, tears down
 ```
 
 `make test-e2e` wraps `scripts/test-db.sh`, which starts
-`docker compose up -d postgres`, waits for readiness, exports
-`VELOCITY_DB_HOST=127.0.0.1 VELOCITY_DB_PORT=55432
-VELOCITY_DB_PASSWORD=velocity`, runs the test suite, and tears the
-container down on exit (via `trap`, even on failure).
+`docker compose up -d postgres`, waits for readiness, exports the
+full `VELOCITY_DB_*` set pointed at `127.0.0.1:55432`, runs the
+test suite, and tears the container down on exit (via `trap`, even
+on failure).
 
 ## Deploy
 
@@ -459,7 +457,7 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 |---|---|
 | `velocity status` says stopped right after `start` | `velocity logs` — usually a config load or DB connection error. |
 | `config.yaml not found` | Copy `config.example.yaml` to `~/.velocity/config.yaml` and edit. |
-| DB connection fails | Verify `VELOCITY_DB_HOST` / `VELOCITY_DB_PORT` / `VELOCITY_DB_PASSWORD`; check `docker compose ps postgres`. |
+| DB connection fails | Verify the full `VELOCITY_DB_*` set is exported; check `docker compose ps postgres`. |
 | Jira webhook returns 401 | `JIRA_WEBHOOK_SECRET` mismatch. Re-export and restart; confirm the same value is set on the Jira webhook. |
 | GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |

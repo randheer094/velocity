@@ -125,7 +125,7 @@ esac
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := db.Start(ctx, config.Get().Database); err != nil {
+	if err := db.Start(ctx); err != nil {
 		os.Stderr.WriteString("arch tests: db skipped: " + err.Error() + "\n")
 	} else {
 		dbReady = true

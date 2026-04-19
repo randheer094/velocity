@@ -31,7 +31,7 @@ func Run() error {
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancelStart()
-	if err := db.Start(startCtx, cfg.Database); err != nil {
+	if err := db.Start(startCtx); err != nil {
 		return fmt.Errorf("start db: %w", err)
 	}
 	defer func() {

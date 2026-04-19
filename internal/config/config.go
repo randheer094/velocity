@@ -211,43 +211,17 @@ type ServerConfig struct {
 	QueueSize      int    `yaml:"queue_size"`
 }
 
-// DatabaseConfig names the external Postgres velocity connects to.
-// Host + password come from DBHostEnv / DBPasswordEnv, never config.yaml.
-type DatabaseConfig struct {
-	Port    int    `yaml:"port"`
-	User    string `yaml:"user"`
-	Name    string `yaml:"name"`
-	SSLMode string `yaml:"sslmode"`
-}
-
-func (d DatabaseConfig) Validate() error {
-	if d.Port <= 0 || d.Port > 65535 {
-		return fmt.Errorf("database.port out of range: %d", d.Port)
-	}
-	if d.User == "" {
-		return errors.New("database.user is required")
-	}
-	if d.Name == "" {
-		return errors.New("database.name is required")
-	}
-	return nil
-}
-
-// Config is the validated on-disk config.yaml shape. Secrets are
-// sourced from env vars (see secrets.go), not written to disk.
+// Config is the validated on-disk config.yaml shape. Secrets and all
+// Postgres connection fields are sourced from env vars (see secrets.go),
+// not written to disk.
 type Config struct {
-	Jira     JiraConfig     `yaml:"jira"`
-	LLM      LLMConfig      `yaml:"llm"`
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	LogLevel string         `yaml:"log_level"`
+	Jira   JiraConfig   `yaml:"jira"`
+	LLM    LLMConfig    `yaml:"llm"`
+	Server ServerConfig `yaml:"server"`
 }
 
 func (c Config) Validate() error {
-	if err := c.Jira.Validate(); err != nil {
-		return err
-	}
-	return c.Database.Validate()
+	return c.Jira.Validate()
 }
 
 func (c *Config) applyDefaults() {
@@ -292,21 +266,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.QueueSize < 1 {
 		c.Server.QueueSize = 1024
-	}
-	if c.Database.Port == 0 {
-		c.Database.Port = 5432
-	}
-	if c.Database.User == "" {
-		c.Database.User = "velocity"
-	}
-	if c.Database.Name == "" {
-		c.Database.Name = "velocity"
-	}
-	if c.Database.SSLMode == "" {
-		c.Database.SSLMode = "disable"
-	}
-	if c.LogLevel == "" {
-		c.LogLevel = "INFO"
 	}
 	c.Jira.BaseURL = strings.TrimRight(c.Jira.BaseURL, "/")
 }

@@ -10,29 +10,28 @@ import (
 	"github.com/randheer094/velocity/internal/data"
 )
 
-func testDBConfig() config.DatabaseConfig {
-	c := config.DatabaseConfig{}
-	// applyDefaults lives on *Config; fill defaults by hand here.
-	c.Port = 5432
-	c.User = "velocity"
-	c.Name = "velocity"
-	c.SSLMode = "disable"
-	return c
-}
-
 var dbReady bool
 
+func dbEnvSet() bool {
+	for _, k := range []string{config.DBHostEnv, config.DBPortEnv, config.DBUserEnv, config.DBPasswordEnv, config.DBNameEnv} {
+		if os.Getenv(k) == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func TestMain(m *testing.M) {
-	if os.Getenv(config.DBHostEnv) != "" && os.Getenv(config.DBPasswordEnv) != "" {
+	if dbEnvSet() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := Start(ctx, testDBConfig()); err == nil {
+		if err := Start(ctx); err == nil {
 			dbReady = true
 		} else {
 			os.Stderr.WriteString("db-backed tests skipped: " + err.Error() + "\n")
 		}
 	} else {
-		os.Stderr.WriteString("db-backed tests skipped: " + config.DBHostEnv + " / " + config.DBPasswordEnv + " not set\n")
+		os.Stderr.WriteString("db-backed tests skipped: export " + config.DBHostEnv + " / " + config.DBPortEnv + " / " + config.DBUserEnv + " / " + config.DBPasswordEnv + " / " + config.DBNameEnv + "\n")
 	}
 	code := m.Run()
 	if dbReady {
@@ -44,13 +43,13 @@ func TestMain(m *testing.M) {
 func requireDB(t *testing.T) {
 	t.Helper()
 	if !dbReady {
-		t.Skipf("requires a running Postgres; set %s and %s", config.DBHostEnv, config.DBPasswordEnv)
+		t.Skipf("requires a running Postgres; set %s / %s / %s / %s / %s", config.DBHostEnv, config.DBPortEnv, config.DBUserEnv, config.DBPasswordEnv, config.DBNameEnv)
 	}
 }
 
 func TestStartIdempotent(t *testing.T) {
 	requireDB(t)
-	if err := Start(context.Background(), testDBConfig()); err != nil {
+	if err := Start(context.Background()); err != nil {
 		t.Errorf("second Start: %v", err)
 	}
 }
