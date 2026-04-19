@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/randheer094/velocity/internal/config"
+	"github.com/randheer094/velocity/internal/data"
 )
 
 // Unset webhook secret env vars so tests default to HMAC-disabled.
@@ -851,6 +852,203 @@ func TestGithubHandlerIssueCommentNoPrefix(t *testing.T) {
 	GithubHandler{}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestBuildWorkflowRunInstructionWithSummary(t *testing.T) {
+	got := buildWorkflowRunInstruction("CI", "https://gh/run/1", "LOG TAIL")
+	for _, want := range []string{"CI", "https://gh/run/1", "LOG TAIL", "Failure logs:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestBuildWorkflowRunInstructionNoSummary(t *testing.T) {
+	got := buildWorkflowRunInstruction("CI", "https://gh/run/1", "")
+	if !strings.Contains(got, "Log fetch failed") {
+		t.Errorf("missing fallback note: %q", got)
+	}
+}
+
+func TestDeriveCICommitHintFromErrorLine(t *testing.T) {
+	summary := "=== job: test (failed) ===\n" +
+		"2026-04-19T10:11:12.000Z some info\n" +
+		"2026-04-19T10:11:13.000Z error: undefined symbol foo\n" +
+		"panic stack below...\n"
+	got := deriveCICommitHint("tests", summary)
+	if !strings.HasPrefix(got, "fix CI: ") {
+		t.Errorf("hint must prefix: %q", got)
+	}
+	if !strings.Contains(got, "error: undefined symbol foo") {
+		t.Errorf("hint must carry error line: %q", got)
+	}
+}
+
+func TestDeriveCICommitHintFallback(t *testing.T) {
+	got := deriveCICommitHint("lint", "")
+	if got != "fix CI: lint" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestDeriveCICommitHintNoErrorLineFallsBackToWorkflow(t *testing.T) {
+	got := deriveCICommitHint("ci", "just some benign log\nnothing fishy\n")
+	if got != "fix CI: ci" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestDeriveCICommitHintTruncates(t *testing.T) {
+	long := "error: " + strings.Repeat("x", 200)
+	got := deriveCICommitHint("w", long)
+	if len(got) > 70 {
+		t.Errorf("hint too long: %d (%q)", len(got), got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected ellipsis: %q", got)
+	}
+}
+
+func TestTruncateHint(t *testing.T) {
+	if got := truncateHint("abc", 10); got != "abc" {
+		t.Errorf("got %q", got)
+	}
+	if got := truncateHint("abcdefghij", 5); got != "abcd…" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestStripLogTimestamp(t *testing.T) {
+	if got := stripLogTimestamp("2026-04-19T10:11:12.000Z hello"); got != "hello" {
+		t.Errorf("got %q", got)
+	}
+	if got := stripLogTimestamp("plain line"); got != "plain line" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
+	cap := startCapturingQueue(t)
+	oldTask := getCodeTaskByKey
+	getCodeTaskByKey = func(key string) *data.CodeTask {
+		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
+	}
+	defer func() { getCodeTaskByKey = oldTask }()
+	oldFetch := fetchWorkflowFailureSummary
+	fetchWorkflowFailureSummary = func(string, int64) string { return "error: boom" }
+	defer func() { fetchWorkflowFailureSummary = oldFetch }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"PROJ-5","html_url":"u"},"repository":{"full_name":"o/r"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+	waitFor(t, func() bool {
+		for _, n := range cap.Names() {
+			if strings.HasPrefix(n, "code.Iterate:ci:PROJ-5") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestGithubHandlerWorkflowRunNotInReview(t *testing.T) {
+	oldTask := getCodeTaskByKey
+	getCodeTaskByKey = func(key string) *data.CodeTask {
+		return &data.CodeTask{IssueKey: key, Status: data.CodeCoding}
+	}
+	defer func() { getCodeTaskByKey = oldTask }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"PROJ-5"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerIssueCommentHappyPath(t *testing.T) {
+	cap := startCapturingQueue(t)
+	oldLookup := lookupBranchForPR
+	lookupBranchForPR = func(string, int) string { return "PROJ-5" }
+	defer func() { lookupBranchForPR = oldLookup }()
+	oldTask := getCodeTaskByKey
+	getCodeTaskByKey = func(key string) *data.CodeTask {
+		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
+	}
+	defer func() { getCodeTaskByKey = oldTask }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity tweak the docs"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+	waitFor(t, func() bool {
+		for _, n := range cap.Names() {
+			if strings.HasPrefix(n, "code.Iterate:cmd:PROJ-5") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestGithubHandlerIssueCommentEmptyAfterPrefix(t *testing.T) {
+	oldLookup := lookupBranchForPR
+	lookupBranchForPR = func(string, int) string { return "PROJ-5" }
+	defer func() { lookupBranchForPR = oldLookup }()
+	oldTask := getCodeTaskByKey
+	getCodeTaskByKey = func(key string) *data.CodeTask {
+		return &data.CodeTask{IssueKey: key, Status: data.CodeInReview}
+	}
+	defer func() { getCodeTaskByKey = oldTask }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity   "}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerWorkflowRunStubbedSummary(t *testing.T) {
+	// Stub fetchWorkflowFailureSummary so the handler's code path that
+	// includes a non-empty summary + commit-hint derivation is exercised
+	// without needing the DB (handler still short-circuits at
+	// GetCodeTask==nil; we're covering the JSON-parse + branch-check
+	// branches and the helper wiring via the pure functions above).
+	old := fetchWorkflowFailureSummary
+	fetchWorkflowFailureSummary = func(string, int64) string { return "error: sentinel" }
+	defer func() { fetchWorkflowFailureSummary = old }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"id":77,"name":"ci","conclusion":"failure","head_branch":"PROJ-99","html_url":"u"},"repository":{"full_name":"o/r"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestFetchWorkflowFailureSummaryEmptyInputs(t *testing.T) {
+	if got := fetchWorkflowFailureSummary("", 1); got != "" {
+		t.Errorf("empty repo should return empty: %q", got)
+	}
+	if got := fetchWorkflowFailureSummary("o/r", 0); got != "" {
+		t.Errorf("zero run id should return empty: %q", got)
 	}
 }
 

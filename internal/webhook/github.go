@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -96,14 +97,15 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 	var payload struct {
 		Action      string `json:"action"`
 		WorkflowRun struct {
-			Name        string   `json:"name"`
-			HTMLURL     string   `json:"html_url"`
-			Conclusion  string   `json:"conclusion"`
-			HeadBranch  string   `json:"head_branch"`
-			PullRequests []struct {
-				Number int `json:"number"`
-			} `json:"pull_requests"`
+			ID         int64  `json:"id"`
+			Name       string `json:"name"`
+			HTMLURL    string `json:"html_url"`
+			Conclusion string `json:"conclusion"`
+			HeadBranch string `json:"head_branch"`
 		} `json:"workflow_run"`
+		Repository struct {
+			FullName string `json:"full_name"`
+		} `json:"repository"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -121,7 +123,7 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	task, _ := db.GetCodeTask(context.Background(), branch)
+	task := getCodeTaskByKey(branch)
 	if task == nil {
 		slog.Info("github webhook: workflow_run for unknown branch, ignoring", "branch", branch)
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "unknown"})
@@ -135,15 +137,82 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 	}
 
 	slog.Info("github webhook: CI failure, iterating", "branch", branch, "workflow", payload.WorkflowRun.Name)
-	reason := "CI check \"" + payload.WorkflowRun.Name + "\" failed on this PR. Run details: " + payload.WorkflowRun.HTMLURL +
-		".\n\nPull the latest branch, diagnose the failing workflow, and push a fix that turns the checks green."
+	summary := fetchWorkflowFailureSummary(payload.Repository.FullName, payload.WorkflowRun.ID)
+	reason := buildWorkflowRunInstruction(payload.WorkflowRun.Name, payload.WorkflowRun.HTMLURL, summary)
+	hint := deriveCICommitHint(payload.WorkflowRun.Name, summary)
 	Enqueue(Job{
 		Name: "code.Iterate:ci:" + branch,
 		Fn: func(ctx context.Context) {
-			code.Iterate(ctx, branch, code.IterateCI, reason)
+			code.Iterate(ctx, branch, code.IterateCI, reason, hint)
 		},
 	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
+}
+
+// fetchWorkflowFailureSummary is a package-level var so tests can stub
+// the network call out.
+var fetchWorkflowFailureSummary = func(repoFullName string, runID int64) string {
+	if repoFullName == "" || runID == 0 {
+		return ""
+	}
+	return github.New().WorkflowRunFailureSummary(repoFullName, runID)
+}
+
+// buildWorkflowRunInstruction composes the /velocity-free iterate
+// prompt that carries the failing CI context to the coder.
+func buildWorkflowRunInstruction(name, htmlURL, summary string) string {
+	if summary != "" {
+		return fmt.Sprintf(
+			"CI check %q failed on this PR. Run: %s\n\nFailure logs:\n%s\n\nDiagnose the failure and push a fix that turns the checks green.",
+			name, htmlURL, summary)
+	}
+	return fmt.Sprintf(
+		"CI check %q failed on this PR. Run: %s\n\n(Log fetch failed — inspect the run manually.) Diagnose the failure and push a fix that turns the checks green.",
+		name, htmlURL)
+}
+
+// deriveCICommitHint picks a short commit subject from the failure
+// log: the first error-looking line, trimmed of noise and capped. On
+// empty summary, returns "fix CI: <workflow>".
+func deriveCICommitHint(workflow, summary string) string {
+	const cap = 60
+	if summary == "" {
+		return "fix CI: " + truncateHint(workflow, cap)
+	}
+	for _, raw := range strings.Split(summary, "\n") {
+		l := strings.TrimSpace(stripLogTimestamp(raw))
+		if l == "" {
+			continue
+		}
+		low := strings.ToLower(l)
+		if strings.Contains(low, "error:") ||
+			strings.HasPrefix(low, "error ") ||
+			strings.HasPrefix(low, "fail") ||
+			strings.HasPrefix(low, "--- fail") ||
+			strings.Contains(low, " failed") {
+			return "fix CI: " + truncateHint(l, cap)
+		}
+	}
+	return "fix CI: " + truncateHint(workflow, cap)
+}
+
+// stripLogTimestamp drops the "2026-01-02T15:04:05.000Z " prefix that
+// GitHub puts on every log line.
+func stripLogTimestamp(s string) string {
+	if len(s) > 20 && s[4] == '-' && s[7] == '-' && s[10] == 'T' {
+		if idx := strings.Index(s, " "); idx > 0 && idx < len(s)-1 {
+			return s[idx+1:]
+		}
+	}
+	return s
+}
+
+func truncateHint(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 func handleIssueComment(w http.ResponseWriter, body []byte) {
@@ -181,7 +250,7 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 	prNumber := payload.Issue.Number
 
 	branch := lookupBranchForPR(repo, prNumber)
-	task, _ := db.GetCodeTask(context.Background(), branch)
+	task := getCodeTaskByKey(branch)
 	if task == nil || task.Status != data.CodeInReview {
 		slog.Info("github webhook: /velocity on out-of-scope PR", "repo", repo, "pr", prNumber, "branch", branch)
 		if repo != "" && prNumber > 0 {
@@ -198,13 +267,21 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 
 	slog.Info("github webhook: /velocity command", "branch", branch, "instruction", instruction)
 	extra := "User command posted on the open PR: " + instruction
+	hint := truncateHint(instruction, 60)
 	Enqueue(Job{
 		Name: "code.Iterate:cmd:" + branch,
 		Fn: func(ctx context.Context) {
-			code.Iterate(ctx, branch, code.IterateCommand, extra)
+			code.Iterate(ctx, branch, code.IterateCommand, extra, hint)
 		},
 	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
+}
+
+// getCodeTaskByKey is a var so tests can stub the DB lookup without
+// needing a live Postgres in the webhook package.
+var getCodeTaskByKey = func(key string) *data.CodeTask {
+	t, _ := db.GetCodeTask(context.Background(), key)
+	return t
 }
 
 // lookupBranchForPR asks GitHub for a PR's head ref. Returning "" is

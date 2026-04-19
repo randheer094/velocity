@@ -199,6 +199,80 @@ func (c *Client) AddPRComment(repoFullName string, number int, body string) bool
 	return true
 }
 
+// WorkflowRunFailureSummary fetches the jobs for a workflow run, pulls
+// the plain-text log of each failed job, and concatenates a trimmed
+// tail of each. Returns "" if the run is unknown, the API errors, or
+// nothing failed. Caps per-job and total size so the output fits in
+// an LLM prompt.
+func (c *Client) WorkflowRunFailureSummary(repoFullName string, runID int64) string {
+	const (
+		perJobCap = 4000
+		totalCap  = 8000
+	)
+	jobs := c.listFailedJobs(repoFullName, runID)
+	if len(jobs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, j := range jobs {
+		if b.Len() >= totalCap {
+			break
+		}
+		log := c.jobLog(repoFullName, j.id)
+		if log == "" {
+			continue
+		}
+		if len(log) > perJobCap {
+			log = "...[truncated]\n" + log[len(log)-perJobCap:]
+		}
+		fmt.Fprintf(&b, "=== job: %s (failed) ===\n%s\n\n", j.name, strings.TrimRight(log, "\n"))
+	}
+	out := b.String()
+	if len(out) > totalCap {
+		out = out[:totalCap] + "\n...[truncated]\n"
+	}
+	return out
+}
+
+type failedJob struct {
+	id   int64
+	name string
+}
+
+func (c *Client) listFailedJobs(repoFullName string, runID int64) []failedJob {
+	path := fmt.Sprintf("/repos/%s/actions/runs/%d/jobs", repoFullName, runID)
+	resp, body, err := c.getWithRetry(path)
+	if err != nil || resp.StatusCode >= 400 {
+		return nil
+	}
+	var out struct {
+		Jobs []struct {
+			ID         int64  `json:"id"`
+			Name       string `json:"name"`
+			Conclusion string `json:"conclusion"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil
+	}
+	failed := make([]failedJob, 0, len(out.Jobs))
+	for _, j := range out.Jobs {
+		if j.Conclusion == "failure" {
+			failed = append(failed, failedJob{id: j.ID, name: j.Name})
+		}
+	}
+	return failed
+}
+
+func (c *Client) jobLog(repoFullName string, jobID int64) string {
+	path := fmt.Sprintf("/repos/%s/actions/jobs/%d/logs", repoFullName, jobID)
+	resp, body, err := c.getWithRetry(path)
+	if err != nil || resp.StatusCode >= 400 {
+		return ""
+	}
+	return string(body)
+}
+
 // ParseRepoURL turns a GitHub URL into "owner/repo".
 func ParseRepoURL(repoURL string) (string, error) {
 	u := strings.TrimSpace(repoURL)

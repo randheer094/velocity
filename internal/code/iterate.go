@@ -35,7 +35,10 @@ const (
 //
 // extraInstruction is appended to the code prompt so the LLM has the
 // CI failure log or the user's /velocity command as fresh context.
-func Iterate(ctx context.Context, issueKey string, reason IterateReason, extraInstruction string) {
+// commitHint becomes the trailing segment of the commit subject
+// ("<KEY>: <hint>") so merged history reads as something better than
+// generic "iterate". Empty hint falls back to "iterate".
+func Iterate(ctx context.Context, issueKey string, reason IterateReason, extraInstruction, commitHint string) {
 	if !claim(issueKey) {
 		slog.Info("code: iterate already in flight", "key", issueKey)
 		return
@@ -56,12 +59,12 @@ func Iterate(ctx context.Context, issueKey string, reason IterateReason, extraIn
 		}
 	}()
 
-	if err := iterate(runCtx, issueKey, extraInstruction, &stage); err != nil {
+	if err := iterate(runCtx, issueKey, extraInstruction, commitHint, &stage); err != nil {
 		reportIterateFailure(runCtx, issueKey, reason, stage, err)
 	}
 }
 
-func iterate(ctx context.Context, issueKey, extra string, stage *string) error {
+func iterate(ctx context.Context, issueKey, extra, commitHint string, stage *string) error {
 	*stage = "load-config"
 	cfg := config.Get()
 	if cfg == nil {
@@ -139,6 +142,9 @@ func iterate(ctx context.Context, issueKey, extra string, stage *string) error {
 
 	*stage = "commit"
 	commitMsg := fmt.Sprintf("%s: iterate", issueKey)
+	if h := strings.TrimSpace(commitHint); h != "" {
+		commitMsg = fmt.Sprintf("%s: %s", issueKey, h)
+	}
 	committed, err := git.AddAllAndCommit(workspace, commitMsg)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)

@@ -59,14 +59,14 @@ func TestIterateDuplicateClaim(t *testing.T) {
 		t.Fatal("first claim should succeed")
 	}
 	defer release("ITER-DUP")
-	Iterate(context.Background(), "ITER-DUP", IterateCI, "x")
+	Iterate(context.Background(), "ITER-DUP", IterateCI, "x", "")
 }
 
 func TestIterateNoTask(t *testing.T) {
 	requireDB(t)
 	// No row in DB → iterate() returns "no code task" error; deferred
 	// reporter runs without panicking.
-	Iterate(context.Background(), "ITER-NONE", IterateCI, "x")
+	Iterate(context.Background(), "ITER-NONE", IterateCI, "x", "")
 }
 
 func TestIterateSkipsWhenNotInReview(t *testing.T) {
@@ -83,7 +83,7 @@ func TestIterateSkipsWhenNotInReview(t *testing.T) {
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	Iterate(ctx, "ITER-NOT-IR", IterateCI, "x")
+	Iterate(ctx, "ITER-NOT-IR", IterateCI, "x", "")
 	got, _ := db.GetCodeTask(ctx, "ITER-NOT-IR")
 	if got.Status != data.CodeDone {
 		t.Errorf("status changed: %q", got.Status)
@@ -105,7 +105,7 @@ func TestIterateBadRepoURL(t *testing.T) {
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	Iterate(ctx, "ITER-BAD-URL", IterateCommand, "do something")
+	Iterate(ctx, "ITER-BAD-URL", IterateCommand, "do something", "")
 	// Failure reporter ran; status should remain in_review.
 	got, _ := db.GetCodeTask(ctx, "ITER-BAD-URL")
 	if got.Status != data.CodeInReview {
@@ -135,7 +135,7 @@ func TestIterateFullHappyPath(t *testing.T) {
 	// Now iterate. LLM stub writes implementation.go again, which is a
 	// no-op on an unchanged tree — Iterate treats that as OK and still
 	// force-pushes the rebased branch.
-	Iterate(ctx, "ITER-OK", IterateCommand, "add more stuff")
+	Iterate(ctx, "ITER-OK", IterateCommand, "add more stuff", "add more stuff")
 	after, _ := db.GetCodeTask(ctx, "ITER-OK")
 	if after.Status != data.CodeInReview {
 		t.Errorf("status should remain in_review: %q", after.Status)
@@ -163,7 +163,7 @@ func TestIterateReclonesMissingWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Iterate(ctx, "ITER-RECLONE", IterateCI, "ci failed, please fix")
+	Iterate(ctx, "ITER-RECLONE", IterateCI, "ci failed, please fix", "fix CI: test failed")
 	after, _ := db.GetCodeTask(ctx, "ITER-RECLONE")
 	if after.Status != data.CodeInReview {
 		t.Errorf("status = %q", after.Status)
@@ -190,7 +190,7 @@ func TestIterateCloneFails(t *testing.T) {
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { return "o/r", nil }
 	defer func() { parseRepoURL = prev }()
-	Iterate(ctx, "ITER-CLONE-FAIL", IterateCI, "fix me")
+	Iterate(ctx, "ITER-CLONE-FAIL", IterateCI, "fix me", "")
 }
 
 func TestIterateFetchFailsOnBrokenWorkspace(t *testing.T) {
@@ -221,7 +221,7 @@ func TestIterateFetchFailsOnBrokenWorkspace(t *testing.T) {
 	prevAuth := configureAuthRemote
 	configureAuthRemote = func(string, string) error { return nil }
 	defer func() { configureAuthRemote = prevAuth }()
-	Iterate(ctx, "ITER-FETCH-FAIL", IterateCI, "fix me")
+	Iterate(ctx, "ITER-FETCH-FAIL", IterateCI, "fix me", "")
 }
 
 func TestIterateAuthRemoteFails(t *testing.T) {
@@ -252,7 +252,7 @@ func TestIterateAuthRemoteFails(t *testing.T) {
 		return errTestAuth
 	}
 	defer func() { configureAuthRemote = prevAuth }()
-	Iterate(ctx, "ITER-AUTH-FAIL", IterateCI, "fix")
+	Iterate(ctx, "ITER-AUTH-FAIL", IterateCI, "fix", "")
 }
 
 var errTestAuth = &stringErr{"auth failed"}
@@ -292,7 +292,7 @@ func TestIterateRebaseConflictAborts(t *testing.T) {
 		t.Fatalf("push main: %v\n%s", err, out)
 	}
 
-	Iterate(ctx, "ITER-REBASE", IterateCI, "fix")
+	Iterate(ctx, "ITER-REBASE", IterateCI, "fix", "")
 	// Iterate failed mid-way; DB status stays in_review.
 	after, _ := db.GetCodeTask(ctx, "ITER-REBASE")
 	if after.Status != data.CodeInReview {
@@ -335,5 +335,5 @@ func TestIteratePanicRecovered(t *testing.T) {
 	prev := parseRepoURL
 	parseRepoURL = func(string) (string, error) { panic("boom") }
 	defer func() { parseRepoURL = prev }()
-	Iterate(ctx, "ITER-PANIC", IterateCI, "x")
+	Iterate(ctx, "ITER-PANIC", IterateCI, "x", "")
 }

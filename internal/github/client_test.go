@@ -300,6 +300,122 @@ func TestPRHeadBranchErrors(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunFailureSummaryHappyPath(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/runs/42/jobs"):
+			_, _ = w.Write([]byte(`{"jobs":[
+				{"id":1,"name":"build","conclusion":"success"},
+				{"id":2,"name":"test","conclusion":"failure"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/jobs/2/logs"):
+			_, _ = w.Write([]byte("FAIL: TestX\nexpected 1, got 2\n"))
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	})
+	got := c.WorkflowRunFailureSummary("o/r", 42)
+	if !strings.Contains(got, "=== job: test (failed) ===") ||
+		!strings.Contains(got, "FAIL: TestX") {
+		t.Errorf("summary missing parts: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryMultipleFailures(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/runs/7/jobs"):
+			_, _ = w.Write([]byte(`{"jobs":[
+				{"id":10,"name":"lint","conclusion":"failure"},
+				{"id":11,"name":"unit","conclusion":"failure"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/jobs/10/logs"):
+			_, _ = w.Write([]byte("lint error: unused import"))
+		case strings.HasSuffix(r.URL.Path, "/jobs/11/logs"):
+			_, _ = w.Write([]byte("unit test FAIL"))
+		}
+	})
+	got := c.WorkflowRunFailureSummary("o/r", 7)
+	if !strings.Contains(got, "lint") || !strings.Contains(got, "unit") {
+		t.Errorf("both jobs should appear: %q", got)
+	}
+	if strings.Index(got, "lint") > strings.Index(got, "unit") {
+		t.Errorf("order preserved: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryNoFailures(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jobs":[{"id":1,"name":"a","conclusion":"success"}]}`))
+	})
+	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+		t.Errorf("expected empty: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryJobsAPIError(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	old := getBackoffs
+	getBackoffs = []time.Duration{0, 0, 0}
+	defer func() { getBackoffs = old }()
+	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+		t.Errorf("expected empty on API error: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryJobsBadJSON(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	})
+	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+		t.Errorf("expected empty on bad JSON: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryLogError(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/runs/1/jobs"):
+			_, _ = w.Write([]byte(`{"jobs":[
+				{"id":1,"name":"a","conclusion":"failure"},
+				{"id":2,"name":"b","conclusion":"failure"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/jobs/1/logs"):
+			w.WriteHeader(http.StatusInternalServerError)
+		case strings.HasSuffix(r.URL.Path, "/jobs/2/logs"):
+			_, _ = w.Write([]byte("job b output"))
+		}
+	})
+	old := getBackoffs
+	getBackoffs = []time.Duration{0, 0, 0}
+	defer func() { getBackoffs = old }()
+	got := c.WorkflowRunFailureSummary("o/r", 1)
+	if strings.Contains(got, "job: a") {
+		t.Errorf("failed-log job a should be skipped: %q", got)
+	}
+	if !strings.Contains(got, "job: b") || !strings.Contains(got, "job b output") {
+		t.Errorf("job b should still render: %q", got)
+	}
+}
+
+func TestWorkflowRunFailureSummaryTruncation(t *testing.T) {
+	big := strings.Repeat("x", 5000) + "TAIL_MARKER"
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/runs/1/jobs"):
+			_, _ = w.Write([]byte(`{"jobs":[{"id":1,"name":"x","conclusion":"failure"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/jobs/1/logs"):
+			_, _ = w.Write([]byte(big))
+		}
+	})
+	got := c.WorkflowRunFailureSummary("o/r", 1)
+	if !strings.Contains(got, "[truncated]") {
+		t.Errorf("expected truncation marker: %q", got[:min(200, len(got))])
+	}
+	if !strings.Contains(got, "TAIL_MARKER") {
+		t.Error("tail should be preserved")
+	}
+}
+
 func TestPRHeadBranchBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not json"))

@@ -164,8 +164,13 @@ Two GitHub events can trigger in-place updates on an open sub-task PR:
   looks the branch up in `code_tasks`; if the sub-task is `IN_REVIEW`,
   it re-uses the existing workspace, fetches, resets the branch to
   `origin/<key>`, rebases onto the default branch, runs the code LLM
-  with the failure URL as context, commits, and force-pushes with
-  lease. Unknown branches and non-`IN_REVIEW` statuses are ignored.
+  with the failure context, commits, and force-pushes with lease.
+  The failure context is pre-fetched: velocity calls the Actions
+  API for the run's failed jobs and inlines a trimmed tail of each
+  job's log into the prompt (no network needed from the LLM
+  sandbox). The commit subject is derived from the first error
+  line in the log (`<KEY>: fix CI: <error>`). Unknown branches and
+  non-`IN_REVIEW` statuses are ignored.
 - **`/velocity <instruction>` comment** — `issue_comment` with
   `action=created` on a PR. If the branch has no `code_tasks` row or
   the row is not `IN_REVIEW`, velocity posts `Cannot perform any

@@ -52,7 +52,9 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
   in. Velocity shells out to `claude --print` for every LLM call.
 - A Jira Cloud workspace and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens)
   for the account velocity will act as.
-- A GitHub personal access token with `repo` scope.
+- A GitHub personal access token with `repo` and `actions:read`
+  scopes. `actions:read` lets velocity pull failing-job logs so it
+  can inline the error into the iterate prompt.
 - Jira `accountId` for the architect and the developer (from
   `https://<your-org>.atlassian.net/rest/api/3/myself`). The two
   may be the **same** Jira user — velocity dispatches on issue type,
@@ -113,7 +115,7 @@ Secrets are **never** in `config.yaml` — export them before
 | Variable | Required | Purpose |
 |---|---|---|
 | `JIRA_API_TOKEN` | yes | Jira REST API auth (basic auth, paired with `jira.email`). |
-| `GH_TOKEN` | yes | GitHub REST API + `git push` auth (repo scope). |
+| `GH_TOKEN` | yes | GitHub REST API + `git push` auth (`repo` + `actions:read` scopes). |
 | `VELOCITY_DB_HOST` | yes | Postgres host (e.g. `127.0.0.1`). |
 | `VELOCITY_DB_PORT` | yes | Postgres port. |
 | `VELOCITY_DB_USER` | yes | Postgres user. |
@@ -317,7 +319,10 @@ Add a repository (or org) webhook posting to
   - *Workflow runs* — `completed` with `conclusion=failure` on an
     `IN_REVIEW` sub-task branch triggers velocity to rebase on the
     default branch, ask the LLM to fix the failure, and force-push
-    with lease. Events on unknown branches are ignored.
+    with lease. Velocity fetches the failing-job logs via the
+    Actions API and inlines the tail into the LLM prompt, and
+    derives a short commit subject (`<KEY>: fix CI: <first error>`)
+    from it. Events on unknown branches are ignored.
   - *Issue comments* — a PR comment starting with `/velocity
     <instruction>` on an `IN_REVIEW` sub-task branch triggers the
     same iterate flow with the instruction as LLM context. If the PR
