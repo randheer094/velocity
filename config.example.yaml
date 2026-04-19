@@ -12,8 +12,6 @@ jira:
   architect_jira_id: 5b10ac8d82e05b22cc7d4ef5
   developer_jira_id: 5b10ac8d82e05b22cc7d4ef5
   repo_url_field: customfield_10050
-  project_keys:
-    - PROJ
   task_status_map:
     new:
       default: To Do

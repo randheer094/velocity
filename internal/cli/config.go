@@ -18,7 +18,7 @@ func newConfigCmd() *cobra.Command {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				if os.IsNotExist(err) {
-					return fmt.Errorf("config.yaml not found at %s — run `velocity setup` first", path)
+					return fmt.Errorf("config.yaml not found at %s — copy config.example.yaml and edit", path)
 				}
 				return err
 			}

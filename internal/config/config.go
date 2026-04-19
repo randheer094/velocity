@@ -106,15 +106,12 @@ func (s SubtaskStatusMap) validate() error {
 
 // JiraConfig holds Jira instance + status vocabulary config.
 // RepoURLField is read off the parent ticket (e.g. "customfield_10050").
-// ProjectKeys is the list of Jira projects setup fetched statuses from,
-// and is what GetProjectStatuses is unioned over if config is re-opened.
 type JiraConfig struct {
 	BaseURL          string           `yaml:"base_url"`
 	Email            string           `yaml:"email"`
 	ArchitectJiraID  string           `yaml:"architect_jira_id"`
 	DeveloperJiraID  string           `yaml:"developer_jira_id"`
 	RepoURLField     string           `yaml:"repo_url_field"`
-	ProjectKeys      []string         `yaml:"project_keys"`
 	TaskStatusMap    TaskStatusMap    `yaml:"task_status_map"`
 	SubtaskStatusMap SubtaskStatusMap `yaml:"subtask_status_map"`
 }
@@ -138,9 +135,6 @@ func (j JiraConfig) Validate() error {
 	}
 	if j.RepoURLField == "" {
 		return errors.New("jira.repo_url_field is required")
-	}
-	if len(j.ProjectKeys) == 0 {
-		return errors.New("jira.project_keys must have at least 1 entry")
 	}
 	if err := j.TaskStatusMap.validate(); err != nil {
 		return err

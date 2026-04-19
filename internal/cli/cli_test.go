@@ -11,70 +11,6 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 )
 
-func TestNonEmpty(t *testing.T) {
-	if err := nonEmpty(""); err == nil {
-		t.Error("empty should fail")
-	}
-	if err := nonEmpty("   "); err == nil {
-		t.Error("whitespace should fail")
-	}
-	if err := nonEmpty("hi"); err != nil {
-		t.Errorf("non-empty: %v", err)
-	}
-}
-
-func TestSplitCommas(t *testing.T) {
-	got := splitCommas(" PROJ , , OPS,")
-	want := []string{"PROJ", "OPS"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("splitCommas = %v, want %v", got, want)
-	}
-	if splitCommas(" , , ") != nil && len(splitCommas(" , , ")) != 0 {
-		t.Errorf("expected empty slice for whitespace-only input")
-	}
-}
-
-func TestToBucket(t *testing.T) {
-	b := toBucket("Done", []string{"Done", "Closed", "Resolved"})
-	if b.Default != "Done" {
-		t.Errorf("default = %q", b.Default)
-	}
-	if len(b.Aliases) != 2 || b.Aliases[0] != "Closed" || b.Aliases[1] != "Resolved" {
-		t.Errorf("aliases = %v", b.Aliases)
-	}
-
-	// Default absent from list still wins; list entries not equal to it
-	// become aliases.
-	b = toBucket("Done", []string{"Closed"})
-	if b.Default != "Done" || len(b.Aliases) != 1 || b.Aliases[0] != "Closed" {
-		t.Errorf("toBucket fallback = %+v", b)
-	}
-}
-
-func TestSeedBucket(t *testing.T) {
-	existing := config.StatusBucket{Default: "A", Aliases: []string{"B"}}
-	list, def := seedBucket(existing, nil, "")
-	if def != "A" || len(list) != 2 || list[0] != "A" || list[1] != "B" {
-		t.Errorf("existing seed wrong: list=%v def=%q", list, def)
-	}
-
-	// no existing + no category → empty
-	list, def = seedBucket(config.StatusBucket{}, nil, "")
-	if len(list) != 0 || def != "" {
-		t.Errorf("empty seed wrong: list=%v def=%q", list, def)
-	}
-}
-
-func TestRunSetupWithoutToken(t *testing.T) {
-	dir := t.TempDir()
-	config.SetDir(dir)
-	t.Setenv(config.JiraTokenEnv, "")
-	err := runSetup()
-	if err == nil || !strings.Contains(err.Error(), config.JiraTokenEnv) {
-		t.Errorf("expected token-required error, got %v", err)
-	}
-}
-
 func TestReadAndWritePid(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
@@ -102,15 +38,6 @@ func TestReadAndWritePid(t *testing.T) {
 	}
 }
 
-func TestRunSetupFormFails(t *testing.T) {
-	dir := t.TempDir()
-	config.SetDir(dir)
-	t.Setenv(config.JiraTokenEnv, "tok")
-	// token set forces past the early returns; without a TTY the huh form
-	// errors at Run(), which is what we're exercising.
-	_ = runSetup()
-}
-
 func writeValidConfig(t *testing.T) {
 	t.Helper()
 	cfg := &config.Config{
@@ -120,7 +47,6 @@ func writeValidConfig(t *testing.T) {
 			ArchitectJiraID: "arch",
 			DeveloperJiraID: "dev",
 			RepoURLField:    "customfield_repo",
-			ProjectKeys:     []string{"PROJ"},
 			TaskStatusMap: config.TaskStatusMap{
 				New:               config.StatusBucket{Default: "To Do"},
 				Planning:          config.StatusBucket{Default: "Planning"},
@@ -154,7 +80,7 @@ func TestNewRootCmd(t *testing.T) {
 	for _, c := range root.Commands() {
 		names[c.Name()] = true
 	}
-	for _, want := range []string{"setup", "start", "stop", "restart", "status", "logs"} {
+	for _, want := range []string{"config", "start", "stop", "restart", "status", "logs"} {
 		if !names[want] {
 			t.Errorf("missing subcommand: %s", want)
 		}
@@ -303,8 +229,8 @@ func TestNewRestartCmdMissingConfig(t *testing.T) {
 	config.SetDir(dir)
 	cmd := newRestartCmd()
 	err := cmd.RunE(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "velocity setup") {
-		t.Fatalf("expected setup-hint error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("expected config-hint error, got %v", err)
 	}
 }
 
@@ -381,8 +307,8 @@ func TestNewStartCmdMissingConfig(t *testing.T) {
 	config.SetDir(dir)
 	cmd := newStartCmd()
 	err := cmd.RunE(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "velocity setup") {
-		t.Fatalf("expected setup-hint error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("expected config-hint error, got %v", err)
 	}
 	if _, statErr := os.Stat(config.PidfilePath()); !os.IsNotExist(statErr) {
 		t.Error("pidfile should not be written when config is missing")
@@ -398,8 +324,8 @@ func TestNewStartCmdInvalidConfig(t *testing.T) {
 	config.SetDir(dir) // reload
 	cmd := newStartCmd()
 	err := cmd.RunE(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "setup") {
-		t.Fatalf("expected setup-hint error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("expected config-hint error, got %v", err)
 	}
 }
 

@@ -31,7 +31,7 @@ webhook. If you don't see a webhook arrow, nothing is happening.
 
 Canonical buckets: `new`, `planning`, `planning_failed`,
 `subtask_in_progress`, `done`, `dismissed`. Operators map each bucket
-to a Jira status name in `config.json` (`jira.task_status_map`).
+to a Jira status name in `config.yaml` (`jira.task_status_map`).
 
 ### Transitions arch performs
 

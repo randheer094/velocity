@@ -279,35 +279,6 @@ func TestListSubtasksBadShape(t *testing.T) {
 	}
 }
 
-func TestGetProjectStatuses(t *testing.T) {
-	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[{
-          "statuses": [
-            {"name":"To Do","statusCategory":{"key":"new"}},
-            {"name":"Done","statusCategory":{"key":"done"}}
-          ]
-        }, {
-          "statuses": [
-            {"name":"To Do"},
-            {"name":"Backlog"}
-          ]
-        }]`))
-	})
-	got := c.GetProjectStatuses("PROJ")
-	if len(got) != 3 {
-		t.Errorf("expected 3 unique statuses, got %v", got)
-	}
-}
-
-func TestGetProjectStatusesBadShape(t *testing.T) {
-	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	})
-	if got := c.GetProjectStatuses("PROJ"); got != nil {
-		t.Errorf("expected nil: %v", got)
-	}
-}
-
 func TestNewFromConfig(t *testing.T) {
 	// no config; client should be built with empty fields and warn
 	c := New()

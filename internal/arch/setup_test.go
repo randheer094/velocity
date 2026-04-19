@@ -15,7 +15,6 @@ const cfgJSON = `{
     "architect_jira_id": "arch-id",
     "developer_jira_id": "dev-id",
     "repo_url_field": "customfield_repo",
-    "project_keys": ["PROJ"],
     "task_status_map": {
       "new": {"default": "To Do"},
       "planning": {"default": "Planning"},

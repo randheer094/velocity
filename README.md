@@ -29,22 +29,25 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
 1. [Prerequisites](#prerequisites)
 2. [Build](#build)
 3. [Install](#install)
-4. [Setup](#setup)
-5. [Run the daemon](#run-the-daemon)
-6. [Commands](#commands)
-7. [Configuration](#configuration)
-8. [Webhook configuration](#webhook-configuration)
-9. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
-10. [Files on disk](#files-on-disk)
-11. [Dependency tracking](#dependency-tracking)
-12. [Test](#test)
-13. [Deploy](#deploy)
-14. [Troubleshooting](#troubleshooting)
+4. [Configure](#configure)
+5. [Postgres](#postgres)
+6. [Run the daemon](#run-the-daemon)
+7. [Commands](#commands)
+8. [Configuration reference](#configuration-reference)
+9. [Webhook configuration](#webhook-configuration)
+10. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
+11. [Files on disk](#files-on-disk)
+12. [Dependency tracking](#dependency-tracking)
+13. [Test](#test)
+14. [Deploy](#deploy)
+15. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
 - macOS 12+ or Linux (x86_64 / arm64).
 - [Go 1.24+](https://go.dev/dl/) and `make` (for building).
+- [Docker](https://www.docker.com/) (for local Postgres via
+  `compose.yml`) or any reachable Postgres 14+ instance.
 - The [Claude CLI](https://claude.com/claude-code) on `PATH`, logged
   in. Velocity shells out to `claude --print` for every LLM call.
 - A Jira Cloud workspace and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens)
@@ -55,7 +58,7 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
   may be the **same** Jira user — velocity dispatches on issue type,
   not on which ID is assigned.
 - A host reachable by Jira Cloud and GitHub webhooks. Port `8000` by
-  default (override in `config.json`). For local development, tunnel
+  default (override in `config.yaml`). For local development, tunnel
   via `ngrok`, `cloudflared`, or `tailscale funnel`.
 
 ## Build
@@ -86,46 +89,82 @@ make install INSTALL_DIR=/usr/local/bin
 
 Make sure the destination is on `PATH`.
 
-## Setup
+## Configure
 
-`velocity setup` is an interactive [huh](https://github.com/charmbracelet/huh)
-form. It prompts for non-secret config and writes
-`~/.velocity/config.json`. Secrets come from environment variables
-— export them before `velocity start`.
+Velocity reads `~/.velocity/config.yaml` (override the data directory
+with `--dir`). Copy the example and edit:
 
 ```bash
-velocity setup          # first-time onboarding
-velocity setup --edit   # re-prompt (pre-filled with existing values)
+mkdir -p ~/.velocity
+cp config.example.yaml ~/.velocity/config.yaml
+$EDITOR ~/.velocity/config.yaml
 ```
 
-The form covers:
-
-- Jira base URL (e.g. `https://acme.atlassian.net`).
-- Jira user email.
-- Architect and developer `accountId`s.
-- Jira custom field ID for the repo URL (e.g. `customfield_10050`).
-- Per-bucket Jira status names (comma-separated list — first is the
-  transition target, the rest are aliases that resolve *into* the
-  bucket on reads). See [Configuration](#configuration).
+The file covers Jira identifiers, per-bucket status names, LLM
+options per role, and the server/database sections. See
+[Configuration reference](#configuration-reference) for the full
+shape.
 
 ### Secrets (env vars)
+
+Secrets are **never** in `config.yaml` — export them before
+`velocity start`:
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `JIRA_API_TOKEN` | yes | Jira REST API auth (basic auth, paired with `jira.email`). |
 | `GH_TOKEN` | yes | GitHub REST API + `git push` auth (repo scope). |
-| `JIRA_WEBHOOK_SECRET` | no | Shared secret Jira uses to sign webhook bodies (`X-Hub-Signature`). Leave unset to disable verification (dev only). |
-| `GH_WEBHOOK_SECRET` | no | Shared secret GitHub uses to sign webhook bodies (`X-Hub-Signature-256`). Leave unset to disable verification (dev only). |
+| `VELOCITY_DB_HOST` | yes | Postgres host (e.g. `127.0.0.1`). |
+| `VELOCITY_DB_PASSWORD` | yes | Postgres password. |
+| `VELOCITY_DB_PORT` | no | Override `database.port` from `config.yaml`. |
+| `JIRA_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature`. Unset disables verification (dev only). |
+| `GH_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature-256`. Unset disables verification (dev only). |
 
 Example:
 
 ```bash
 export JIRA_API_TOKEN="..."
 export GH_TOKEN="ghp_..."
+export VELOCITY_DB_HOST="127.0.0.1"
+export VELOCITY_DB_PASSWORD="velocity"
 export JIRA_WEBHOOK_SECRET="..."
 export GH_WEBHOOK_SECRET="..."
 velocity start
 ```
+
+## Postgres
+
+Velocity does **not** manage its own database. Provide any Postgres
+14+ instance and point velocity at it via
+`VELOCITY_DB_HOST` / `VELOCITY_DB_PASSWORD` (and optionally
+`VELOCITY_DB_PORT`). The other fields (`user`, `name`, `sslmode`,
+`port`) live in `config.yaml` under `database`.
+
+### Local development
+
+The repo ships a Docker Compose file that runs Postgres 16 on port
+`55432` (non-default to avoid clashes with host Postgres):
+
+```bash
+docker compose up -d postgres
+# stop + remove:
+docker compose down
+```
+
+Data persists in `./.pgdata/` (gitignored). Matching env vars:
+
+```bash
+export VELOCITY_DB_HOST=127.0.0.1
+export VELOCITY_DB_PORT=55432
+export VELOCITY_DB_PASSWORD=velocity
+```
+
+### Schema migrations
+
+Schema lives in `internal/db/migrations/NNNN_*.sql` and is applied
+forward-only on `velocity start`. Each migration runs in its own
+transaction and is recorded in `schema_migrations`. To change the
+schema, add a **new** numbered file — never edit a shipped one.
 
 ## Run the daemon
 
@@ -134,18 +173,13 @@ velocity start          # detaches; PID at ~/.velocity/daemon.pid
 velocity status         # running / stopped
 velocity logs -f        # tail ~/.velocity/daemon.log
 velocity stop           # SIGTERM, SIGKILL after 10 s
+velocity restart        # stop + start (pick up config.yaml edits)
 ```
 
 Foreground mode for debugging:
 
 ```bash
 velocity start --foreground
-```
-
-Restart after hand-editing `config.json`:
-
-```bash
-velocity restart
 ```
 
 All subcommands accept `--dir <path>` to target an alternate data
@@ -155,7 +189,7 @@ directory (default `~/.velocity`).
 
 | Command | Description |
 |---|---|
-| `velocity setup` | Interactive credential + config onboarding. `--edit` re-prompts. |
+| `velocity config` | Print the current `config.yaml` to stdout. |
 | `velocity start` | Detach and run the webhook server. |
 | `velocity start --foreground` | Run in the current terminal (debug). |
 | `velocity stop` | SIGTERM the daemon; SIGKILL after 10 s. |
@@ -165,58 +199,57 @@ directory (default `~/.velocity`).
 | `velocity logs -f` | Tail the log. |
 | `velocity --dir <path>` | Target an alternate data directory. |
 
-## Configuration
+## Configuration reference
 
-`~/.velocity/config.json` is written by `velocity setup` and can be
-hand-edited (restart with `velocity restart`). Secrets are **not**
-in this file — see [Secrets (env vars)](#secrets-env-vars).
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8000
+  max_concurrency: 1       # workers draining the FIFO queue (default 1 = strict serial)
+  queue_size: 1024         # enqueue buffer; overflow is dropped + logged
 
-```jsonc
-{
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "max_concurrency": 1,       // workers draining the FIFO queue (default 1, strict serial)
-    "queue_size": 1024          // enqueue buffer; overflow is dropped + logged
-  },
-  "jira": {
-    "base_url": "https://acme.atlassian.net",
-    "user_email": "velocity-bot@acme.com",
-    "architect_account_id": "712020:...",
-    "developer_account_id": "712020:...",
-    "repo_url_field": "customfield_10050",
-    "task_status_map": {
-      "new":                 {"default": "To Do",            "aliases": ["Backlog"]},
-      "planning":            {"default": "Planning"},
-      "planning_failed":     {"default": "Planning Failed"},
-      "subtask_in_progress": {"default": "In Progress"},
-      "done":                {"default": "Done"},
-      "dismissed":           {"default": "Dismissed"}
-    },
-    "subtask_status_map": {
-      "new":         {"default": "To Do"},
-      "in_progress": {"default": "In Progress", "aliases": ["Doing"]},
-      "pr_open":     {"default": "In Review"},
-      "code_failed": {"default": "Dev Failed"},
-      "done":        {"default": "Done",        "aliases": ["Closed"]},
-      "dismissed":   {"default": "Dismissed"}
-    }
-  },
-  "llm": {
-    "arch": {
-      "model": "claude-opus-4-5",
-      "allowed_tools": ["Read", "Grep", "Glob"],
-      "permission_mode": "default",
-      "timeout_sec": 600
-    },
-    "code": {
-      "model": "claude-opus-4-5",
-      "allowed_tools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
-      "permission_mode": "acceptEdits",
-      "timeout_sec": 1800
-    }
-  }
-}
+database:
+  port: 5432               # overridden by VELOCITY_DB_PORT if set
+  user: velocity
+  name: velocity
+  sslmode: disable
+
+jira:
+  base_url: https://acme.atlassian.net
+  email: velocity-bot@acme.com
+  architect_jira_id: 712020:...
+  developer_jira_id: 712020:...
+  repo_url_field: customfield_10050
+  task_status_map:
+    new:                 {default: To Do,            aliases: [Backlog]}
+    planning:            {default: Planning}
+    planning_failed:     {default: Planning Failed}
+    subtask_in_progress: {default: In Progress}
+    done:                {default: Done}
+    dismissed:           {default: Dismissed}
+  subtask_status_map:
+    new:         {default: To Do}
+    in_progress: {default: In Progress, aliases: [Doing]}
+    pr_open:     {default: In Review}
+    code_failed: {default: Dev Failed}
+    done:        {default: Done,        aliases: [Closed]}
+    dismissed:   {default: Dismissed}
+
+llm:
+  arch:
+    provider: claude_cli
+    model: claude-opus-4-6
+    allowed_tools: Read Glob Grep LS
+    permission_mode: bypassPermissions
+    timeout_sec: 600
+  code:
+    provider: claude_cli
+    model: claude-sonnet-4-6
+    allowed_tools: Read Write Edit Glob Grep LS MultiEdit Bash
+    permission_mode: bypassPermissions
+    timeout_sec: 1800
+
+log_level: INFO
 ```
 
 ### Status buckets
@@ -226,10 +259,7 @@ plus optional **aliases**. The default is the status velocity
 transitions *into*; aliases resolve *into* the bucket on reads
 (case-insensitive). One bucket can absorb multiple real-world
 Jira statuses (e.g. `In Progress` and `Doing` both count as
-`InProgress`).
-
-During `velocity setup`, enter a comma-separated list per bucket —
-first entry becomes the default, rest become aliases.
+`in_progress`).
 
 ### Server tuning
 
@@ -245,12 +275,12 @@ first entry becomes the default, rest become aliases.
 
 `llm.arch` and `llm.code` each configure:
 
+- `provider` — currently only `claude_cli`.
 - `model` — Claude model ID passed to `claude --model`.
-- `allowed_tools` — list passed to `--allowedTools`.
-- `permission_mode` — one of Claude's permission modes (e.g.
-  `default`, `acceptEdits`, `bypassPermissions`).
-- `timeout_sec` — hard timeout on the `claude` subprocess. Default
-  600 s for arch, 1800 s for code.
+- `allowed_tools` — space-separated list passed to `--allowedTools`.
+- `permission_mode` — one of Claude's permission modes
+  (`default`, `acceptEdits`, `bypassPermissions`).
+- `timeout_sec` — hard timeout on the `claude` subprocess.
 
 ## Webhook configuration
 
@@ -300,27 +330,18 @@ human-readable label.
 
 ```
 ~/.velocity/
-├── config.json
+├── config.yaml
 ├── daemon.pid
 ├── daemon.log
-├── data/                    embedded Postgres cluster (binaries, pgdata, runtime, cache)
 └── workspace/<JIRA-KEY>/    per-ticket git clones (ephemeral)
 ```
 
-All plan and code-task state lives in Postgres under `data/`. The
-cluster is started and stopped by `velocity` itself — you do not
-run a separate Postgres. Workspaces are removed once a ticket
-completes; DB rows stay as history.
+Plan and code-task state lives in the external Postgres instance.
+Workspaces are removed once a ticket completes; DB rows stay as
+history.
 
 Branches are named **exactly** after the sub-task Jira key (e.g.
 `ENG-102`, not `feature/ENG-102`).
-
-### Schema changes
-
-There is no `ALTER` / migration path. All DDL is
-`CREATE TABLE IF NOT EXISTS`. To pick up new columns after an
-upgrade, stop velocity and wipe `~/.velocity/data/`. Open plans
-lose their DB rows; re-trigger them via Jira re-assignment.
 
 ## Dependency tracking
 
@@ -339,26 +360,21 @@ and `TaskSuccessors(ctx, jiraKey)` for programmatic lookups.
 ## Test
 
 ```bash
-make test       # go test ./...
+make test       # unit tests; packages that need a DB skip if none configured
 make vet        # go vet ./...
+make test-e2e   # boots ./compose.yml postgres, runs `go test ./...`, tears down
 ```
 
-Or directly:
-
-```bash
-go test ./...
-go test -race ./...
-go test ./internal/webhook/...    # a single package
-```
-
-The test suite does not require Claude, Jira, or GitHub
-credentials — HTTP clients are stubbed and the embedded Postgres
-is spun up per-test.
+`make test-e2e` wraps `scripts/test-db.sh`, which starts
+`docker compose up -d postgres`, waits for readiness, exports
+`VELOCITY_DB_HOST=127.0.0.1 VELOCITY_DB_PORT=55432
+VELOCITY_DB_PASSWORD=velocity`, runs the test suite, and tears the
+container down on exit (via `trap`, even on failure).
 
 ## Deploy
 
 Velocity is a single binary. Anywhere you can run the binary and
-reach Jira + GitHub works. Two common setups:
+reach Jira + GitHub + Postgres works. Two common setups:
 
 ### systemd (Linux)
 
@@ -374,18 +390,22 @@ Wants=network-online.target
 Type=simple
 User=velocity
 Environment=HOME=/home/velocity
+EnvironmentFile=/etc/velocity/secrets.env
 ExecStart=/usr/local/bin/velocity start --foreground
 Restart=on-failure
 RestartSec=5
-# velocity owns its own data dir; give it write access
 ReadWritePaths=/home/velocity/.velocity
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+Write `/etc/velocity/secrets.env` (mode `0600`) with the env vars
+from [Secrets](#secrets-env-vars), then:
+
 ```bash
-sudo -u velocity velocity setup          # one-time, interactive
+sudo -u velocity cp /path/to/config.example.yaml /home/velocity/.velocity/config.yaml
+sudo -u velocity $EDITOR /home/velocity/.velocity/config.yaml
 sudo systemctl daemon-reload
 sudo systemctl enable --now velocity
 sudo journalctl -fu velocity
@@ -437,13 +457,15 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 
 | Symptom | Check |
 |---|---|
-| `velocity status` says stopped right after `start` | `velocity logs` — usually a config load or Postgres startup error. |
+| `velocity status` says stopped right after `start` | `velocity logs` — usually a config load or DB connection error. |
+| `config.yaml not found` | Copy `config.example.yaml` to `~/.velocity/config.yaml` and edit. |
+| DB connection fails | Verify `VELOCITY_DB_HOST` / `VELOCITY_DB_PORT` / `VELOCITY_DB_PASSWORD`; check `docker compose ps postgres`. |
 | Jira webhook returns 401 | `JIRA_WEBHOOK_SECRET` mismatch. Re-export and restart; confirm the same value is set on the Jira webhook. |
 | GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |
 | Sub-task PR never opens | `code: stage failed`; usually a `git push` auth failure or a Claude timeout. Bump `llm.code.timeout_sec`. |
 | Queue drops under load | Raise `server.queue_size`, or `server.max_concurrency`, or both. |
-| DDL changes not picked up | Wipe `~/.velocity/data/` (schema is `CREATE TABLE IF NOT EXISTS` only). |
+| Schema change not picked up | Add a new `internal/db/migrations/NNNN_*.sql` and restart; migrations are forward-only. |
 
 Full errors always land in `~/.velocity/daemon.log`. Jira comments
 are secret-redacted and capped at 1000 chars — the log has the raw
@@ -452,11 +474,12 @@ output.
 ## Developing
 
 ```bash
-make build     # → ./velocity
-make install   # build + copy into ~/.local/bin
-make test      # go test ./...
-make vet       # go vet ./...
-make clean     # rm ./velocity
+make build      # → ./velocity
+make install    # build + copy into ~/.local/bin
+make test       # go test ./...
+make test-e2e   # docker compose Postgres + full suite
+make vet        # go vet ./...
+make clean      # rm ./velocity
 ```
 
 Module path: `github.com/randheer094/velocity`. Source tree overview

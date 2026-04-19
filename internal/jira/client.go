@@ -51,7 +51,8 @@ func New() *Client {
 	return NewWithCreds(baseURL, email, token)
 }
 
-// NewWithCreds is for setup to probe Jira before config.yaml is saved.
+// NewWithCreds builds a Client from explicit creds. Used by tests and
+// by New() after reading config + env.
 func NewWithCreds(baseURL, email, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -365,58 +366,6 @@ func (c *Client) ListSubtasks(parentKey string) []string {
 		if key, _ := st["key"].(string); key != "" {
 			out = append(out, key)
 		}
-	}
-	return out
-}
-
-// ProjectStatus is a Jira workflow status name + category.
-type ProjectStatus struct {
-	Name     string
-	Category string
-}
-
-func (c *Client) GetProjectStatuses(projectKey string) []ProjectStatus {
-	raw := c.get("project/"+projectKey+"/statuses", nil)
-	if raw == nil {
-		return nil
-	}
-	issueTypes, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	seen := map[string]string{}
-	var order []string
-	for _, item := range issueTypes {
-		it, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		statuses, _ := it["statuses"].([]any)
-		for _, s := range statuses {
-			st, ok := s.(map[string]any)
-			if !ok {
-				continue
-			}
-			name, _ := st["name"].(string)
-			if name == "" {
-				continue
-			}
-			if _, dup := seen[name]; dup {
-				continue
-			}
-			cat := "undefined"
-			if sc, ok := st["statusCategory"].(map[string]any); ok {
-				if k, ok := sc["key"].(string); ok && k != "" {
-					cat = k
-				}
-			}
-			seen[name] = cat
-			order = append(order, name)
-		}
-	}
-	out := make([]ProjectStatus, 0, len(order))
-	for _, n := range order {
-		out = append(out, ProjectStatus{Name: n, Category: seen[n]})
 	}
 	return out
 }

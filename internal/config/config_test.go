@@ -14,7 +14,6 @@ func validJira() JiraConfig {
 		ArchitectJiraID: "arch-id",
 		DeveloperJiraID: "dev-id",
 		RepoURLField:    "customfield_10050",
-		ProjectKeys:     []string{"PROJ"},
 		TaskStatusMap: TaskStatusMap{
 			New:               StatusBucket{Default: "To Do"},
 			Planning:          StatusBucket{Default: "Planning"},
@@ -46,10 +45,9 @@ func TestJiraConfigValidate(t *testing.T) {
 		"missing email":      func(j *JiraConfig) { j.Email = "" },
 		"missing arch id":    func(j *JiraConfig) { j.ArchitectJiraID = "" },
 		"missing dev id":     func(j *JiraConfig) { j.DeveloperJiraID = "" },
-		"missing repo field":   func(j *JiraConfig) { j.RepoURLField = "" },
-		"missing project keys": func(j *JiraConfig) { j.ProjectKeys = nil },
-		"missing task new":     func(j *JiraConfig) { j.TaskStatusMap.New = StatusBucket{} },
-		"missing sub done":     func(j *JiraConfig) { j.SubtaskStatusMap.Done = StatusBucket{} },
+		"missing repo field": func(j *JiraConfig) { j.RepoURLField = "" },
+		"missing task new":   func(j *JiraConfig) { j.TaskStatusMap.New = StatusBucket{} },
+		"missing sub done":   func(j *JiraConfig) { j.SubtaskStatusMap.Done = StatusBucket{} },
 		"task overlap": func(j *JiraConfig) {
 			j.TaskStatusMap.Planning = StatusBucket{Default: "Same"}
 			j.TaskStatusMap.PlanningFailed = StatusBucket{Default: "Same"}

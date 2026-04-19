@@ -19,7 +19,6 @@ func writeConfig(t *testing.T) {
     "architect_jira_id": "arch",
     "developer_jira_id": "dev",
     "repo_url_field": "customfield_1",
-    "project_keys": ["PROJ"],
     "task_status_map": {
       "new": {"default": "To Do"},
       "planning": {"default": "Planning"},

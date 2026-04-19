@@ -23,7 +23,6 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&dir, "dir", defaultDir, "velocity data directory")
 
 	root.AddCommand(
-		newSetupCmd(),
 		newConfigCmd(),
 		newStartCmd(),
 		newStopCmd(),

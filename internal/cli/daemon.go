@@ -23,9 +23,9 @@ func requireConfig() error {
 		return nil
 	}
 	if e := config.LoadError(); e != "" {
-		return fmt.Errorf("%s\nFix the config or re-run `velocity setup`", e)
+		return fmt.Errorf("%s\nFix %s (see config.example.yaml)", e, config.ConfigPath())
 	}
-	return errors.New("velocity is not configured. Run `velocity setup` first")
+	return fmt.Errorf("velocity is not configured: write %s (see config.example.yaml)", config.ConfigPath())
 }
 
 func newStartCmd() *cobra.Command {
