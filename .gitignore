@@ -23,3 +23,6 @@ settings.local.json
 .env
 *.env
 !.env.example
+
+# Local Postgres data (compose.yml)
+/.pgdata/

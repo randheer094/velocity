@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: velocity-pg
+    environment:
+      POSTGRES_USER: velocity
+      POSTGRES_PASSWORD: velocity
+      POSTGRES_DB: velocity
+    ports:
+      - "55432:5432"
+    volumes:
+      - ./.pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U velocity -d velocity"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

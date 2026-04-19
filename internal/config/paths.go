@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultAgentDir = "~/.velocity"
-	configFilename  = "config.json"
+	configFilename  = "config.yaml"
 	pidFilename     = "daemon.pid"
 	logFilename     = "daemon.log"
 	dataSubdir      = "data"

@@ -1,0 +1,70 @@
+# velocity config.example.yaml
+#
+# Copy to ~/.velocity/config.yaml (or <--dir>/config.yaml) and edit.
+# Secrets never live here — export them via env vars:
+#   JIRA_API_TOKEN, GH_TOKEN,
+#   JIRA_WEBHOOK_SECRET, GH_WEBHOOK_SECRET,
+#   VELOCITY_DB_HOST, VELOCITY_DB_PASSWORD
+
+jira:
+  base_url: https://your-org.atlassian.net
+  email: you@example.com
+  architect_jira_id: 5b10ac8d82e05b22cc7d4ef5
+  developer_jira_id: 5b10ac8d82e05b22cc7d4ef5
+  repo_url_field: customfield_10050
+  project_keys:
+    - PROJ
+  task_status_map:
+    new:
+      default: To Do
+    planning:
+      default: Planning
+    planning_failed:
+      default: Planning Failed
+    subtask_in_progress:
+      default: In Progress
+    done:
+      default: Done
+    dismissed:
+      default: Dismissed
+  subtask_status_map:
+    new:
+      default: To Do
+    in_progress:
+      default: In Progress
+    pr_open:
+      default: In Review
+    code_failed:
+      default: Dev Failed
+    done:
+      default: Done
+    dismissed:
+      default: Dismissed
+
+llm:
+  arch:
+    provider: claude_cli
+    model: claude-opus-4-6
+    allowed_tools: Read Glob Grep LS
+    permission_mode: bypassPermissions
+    timeout_sec: 600
+  code:
+    provider: claude_cli
+    model: claude-sonnet-4-6
+    allowed_tools: Read Write Edit Glob Grep LS MultiEdit Bash
+    permission_mode: bypassPermissions
+    timeout_sec: 1800
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  max_concurrency: 1
+  queue_size: 1024
+
+database:
+  port: 5432
+  user: velocity
+  name: velocity
+  sslmode: disable
+
+log_level: INFO

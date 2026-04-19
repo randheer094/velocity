@@ -11,7 +11,7 @@ import (
 func writeConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.json")
+	cfgPath := filepath.Join(dir, "config.yaml")
 	body := `{
   "jira": {
     "base_url": "https://example.atlassian.net",

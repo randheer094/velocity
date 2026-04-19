@@ -51,7 +51,7 @@ func New() *Client {
 	return NewWithCreds(baseURL, email, token)
 }
 
-// NewWithCreds is for setup to probe Jira before config.json is saved.
+// NewWithCreds is for setup to probe Jira before config.yaml is saved.
 func NewWithCreds(baseURL, email, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),

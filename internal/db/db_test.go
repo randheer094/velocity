@@ -3,39 +3,54 @@ package db
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/data"
 )
 
-var dbDir string
+func testDBConfig() config.DatabaseConfig {
+	c := config.DatabaseConfig{}
+	// applyDefaults lives on *Config; fill defaults by hand here.
+	c.Port = 5432
+	c.User = "velocity"
+	c.Name = "velocity"
+	c.SSLMode = "disable"
+	return c
+}
+
+var dbReady bool
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "velocity-db-")
-	if err != nil {
-		panic(err)
-	}
-	dbDir = dir
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	if err := Start(ctx, dbDir); err != nil {
-		// If the embedded Postgres can't start in this environment (e.g. no
-		// network for binary download), skip all db tests rather than fail
-		// the suite.
-		_ = os.RemoveAll(dbDir)
-		os.Stderr.WriteString("db tests skipped: " + err.Error() + "\n")
-		os.Exit(0)
+	if os.Getenv(config.DBHostEnv) != "" && os.Getenv(config.DBPasswordEnv) != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := Start(ctx, testDBConfig()); err == nil {
+			dbReady = true
+		} else {
+			os.Stderr.WriteString("db-backed tests skipped: " + err.Error() + "\n")
+		}
+	} else {
+		os.Stderr.WriteString("db-backed tests skipped: " + config.DBHostEnv + " / " + config.DBPasswordEnv + " not set\n")
 	}
 	code := m.Run()
-	_ = Stop()
-	_ = os.RemoveAll(dbDir)
+	if dbReady {
+		_ = Stop()
+	}
 	os.Exit(code)
 }
 
+func requireDB(t *testing.T) {
+	t.Helper()
+	if !dbReady {
+		t.Skipf("requires a running Postgres; set %s and %s", config.DBHostEnv, config.DBPasswordEnv)
+	}
+}
+
 func TestStartIdempotent(t *testing.T) {
-	if err := Start(context.Background(), dbDir); err != nil {
+	requireDB(t)
+	if err := Start(context.Background(), testDBConfig()); err != nil {
 		t.Errorf("second Start: %v", err)
 	}
 }
@@ -55,22 +70,14 @@ func TestStopBeforeStartIsNoop(t *testing.T) {
 }
 
 func TestSharedReturns(t *testing.T) {
+	requireDB(t)
 	if Shared() == nil {
 		t.Error("Shared should be non-nil after Start")
 	}
 }
 
-func TestPickFreePort(t *testing.T) {
-	p, err := pickFreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p == 0 {
-		t.Error("pickFreePort returned 0")
-	}
-}
-
 func TestSavePlanAndGetPlan(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "PROJ-1",
@@ -111,6 +118,7 @@ func TestSavePlanAndGetPlan(t *testing.T) {
 }
 
 func TestGetPlanMissing(t *testing.T) {
+	requireDB(t)
 	got, err := GetPlan(context.Background(), "NOPE-1")
 	if err != nil {
 		t.Errorf("err = %v", err)
@@ -121,6 +129,7 @@ func TestGetPlanMissing(t *testing.T) {
 }
 
 func TestMarkPlanDone(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "PROJ-D",
@@ -142,6 +151,7 @@ func TestMarkPlanDone(t *testing.T) {
 }
 
 func TestMarkPlanFailedAndDismissed(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "PROJ-F",
@@ -170,6 +180,7 @@ func TestMarkPlanFailedAndDismissed(t *testing.T) {
 }
 
 func TestWipePlanChildren(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "PROJ-W",
@@ -197,6 +208,7 @@ func TestWipePlanChildren(t *testing.T) {
 }
 
 func TestSaveCodeTaskAndGet(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	task := &data.CodeTask{
 		IssueKey:      "PROJ-2",
@@ -220,6 +232,7 @@ func TestSaveCodeTaskAndGet(t *testing.T) {
 }
 
 func TestGetCodeTaskMissing(t *testing.T) {
+	requireDB(t)
 	got, err := GetCodeTask(context.Background(), "NOPE-X")
 	if err != nil {
 		t.Errorf("err = %v", err)
@@ -230,6 +243,7 @@ func TestGetCodeTaskMissing(t *testing.T) {
 }
 
 func TestMarkCodeFailed(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	if err := MarkCodeFailed(ctx, "PROJ-NEW", "PROJ-1", "https://r", "title", "PROJ-NEW", "stage", "err"); err != nil {
 		t.Fatal(err)
@@ -241,6 +255,7 @@ func TestMarkCodeFailed(t *testing.T) {
 }
 
 func TestMarkCodeFailedExisting(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	task := &data.CodeTask{IssueKey: "PROJ-EX", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-EX", Status: data.CodeInProgress}
 	if err := SaveCodeTask(ctx, task); err != nil {
@@ -256,6 +271,7 @@ func TestMarkCodeFailedExisting(t *testing.T) {
 }
 
 func TestMarkCodeDismissed(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	task := &data.CodeTask{IssueKey: "PROJ-DM", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-DM", Status: data.CodeInProgress}
 	if err := SaveCodeTask(ctx, task); err != nil {
@@ -275,6 +291,7 @@ func TestMarkCodeDismissed(t *testing.T) {
 }
 
 func TestSavePlanPreservesCreatedAtAndStatus(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	earlier := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	plan := &data.Plan{
@@ -299,6 +316,7 @@ func TestSavePlanPreservesCreatedAtAndStatus(t *testing.T) {
 }
 
 func TestSavePlanIdempotent(t *testing.T) {
+	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "PROJ-I",
@@ -318,11 +336,6 @@ func TestSavePlanIdempotent(t *testing.T) {
 	if got.Name != "second" {
 		t.Errorf("name = %q", got.Name)
 	}
-}
-
-// shouldRunFromTmp avoids unused-var complaints if we add more files.
-func TestPaths(t *testing.T) {
-	_ = filepath.Join(dbDir, "x")
 }
 
 // TestNotStartedReturnsErr cycles dataOK=false to exercise the

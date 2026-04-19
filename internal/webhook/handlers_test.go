@@ -53,7 +53,7 @@ const goodConfig = `{
 func setupConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(goodConfig), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(goodConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir)

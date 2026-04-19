@@ -13,32 +13,22 @@ import (
 )
 
 func newSetupCmd() *cobra.Command {
-	var edit bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "setup",
 		Short: "Interactive config onboarding (secrets come from env vars)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSetup(edit)
+			return runSetup()
 		},
 	}
-	cmd.Flags().BoolVar(&edit, "edit", false, "Re-prompt even when values already exist")
-	return cmd
 }
 
-func runSetup(edit bool) error {
-	cfg := config.Get()
-	if !edit && cfg != nil {
-		fmt.Println("velocity already configured. Re-run with --edit to modify.")
-		printSecretReminder()
-		return nil
-	}
-
+func runSetup() error {
 	token := os.Getenv(config.JiraTokenEnv)
 	if token == "" {
 		return fmt.Errorf("%s must be exported before `velocity setup` — setup fetches Jira statuses", config.JiraTokenEnv)
 	}
 
-	existing := cfg
+	existing := config.Get()
 	if existing == nil {
 		existing = &config.Config{}
 	}

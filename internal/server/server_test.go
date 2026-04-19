@@ -61,13 +61,13 @@ func TestRunMissingConfig(t *testing.T) {
 }
 
 func TestRunStartsAndShutdown(t *testing.T) {
-	if os.Getenv("SKIP_EMBEDDED_PG") != "" {
-		t.Skip("embedded pg disabled")
+	if os.Getenv(config.DBHostEnv) == "" || os.Getenv(config.DBPasswordEnv) == "" {
+		t.Skipf("set %s and %s to run", config.DBHostEnv, config.DBPasswordEnv)
 	}
 	dir := t.TempDir()
 	port := freePort(t)
 	cfg := fmt.Sprintf(cfgTmpl, port)
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir)

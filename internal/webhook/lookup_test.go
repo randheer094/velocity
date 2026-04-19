@@ -46,7 +46,7 @@ func TestLookupParentRepoFull(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := strings.ReplaceAll(goodConfig, "https://example.atlassian.net", srv.URL)
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir)

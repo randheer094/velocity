@@ -42,7 +42,7 @@ func setupConfig(t *testing.T) func() {
 	t.Helper()
 	prev := config.AgentDir
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfgJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir)

@@ -1,19 +1,20 @@
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // StatusBucket maps a canonical bucket to Jira status names. Default is
 // the transition target; Aliases also resolve into the bucket on reads.
 type StatusBucket struct {
-	Default string   `json:"default"`
-	Aliases []string `json:"aliases,omitempty"`
+	Default string   `yaml:"default"`
+	Aliases []string `yaml:"aliases,omitempty"`
 }
 
 func (b StatusBucket) All() []string {
@@ -54,12 +55,12 @@ func (b StatusBucket) Matches(name string) bool {
 }
 
 type TaskStatusMap struct {
-	New               StatusBucket `json:"new"`
-	Planning          StatusBucket `json:"planning"`
-	PlanningFailed    StatusBucket `json:"planning_failed"`
-	SubtaskInProgress StatusBucket `json:"subtask_in_progress"`
-	Done              StatusBucket `json:"done"`
-	Dismissed         StatusBucket `json:"dismissed"`
+	New               StatusBucket `yaml:"new"`
+	Planning          StatusBucket `yaml:"planning"`
+	PlanningFailed    StatusBucket `yaml:"planning_failed"`
+	SubtaskInProgress StatusBucket `yaml:"subtask_in_progress"`
+	Done              StatusBucket `yaml:"done"`
+	Dismissed         StatusBucket `yaml:"dismissed"`
 }
 
 func (s TaskStatusMap) validate() error {
@@ -79,12 +80,12 @@ func (s TaskStatusMap) validate() error {
 }
 
 type SubtaskStatusMap struct {
-	New        StatusBucket `json:"new"`
-	InProgress StatusBucket `json:"in_progress"`
-	PROpen     StatusBucket `json:"pr_open"`
-	CodeFailed StatusBucket `json:"code_failed"`
-	Done       StatusBucket `json:"done"`
-	Dismissed  StatusBucket `json:"dismissed"`
+	New        StatusBucket `yaml:"new"`
+	InProgress StatusBucket `yaml:"in_progress"`
+	PROpen     StatusBucket `yaml:"pr_open"`
+	CodeFailed StatusBucket `yaml:"code_failed"`
+	Done       StatusBucket `yaml:"done"`
+	Dismissed  StatusBucket `yaml:"dismissed"`
 }
 
 func (s SubtaskStatusMap) validate() error {
@@ -108,14 +109,14 @@ func (s SubtaskStatusMap) validate() error {
 // ProjectKeys is the list of Jira projects setup fetched statuses from,
 // and is what GetProjectStatuses is unioned over if config is re-opened.
 type JiraConfig struct {
-	BaseURL          string           `json:"base_url"`
-	Email            string           `json:"email"`
-	ArchitectJiraID  string           `json:"architect_jira_id"`
-	DeveloperJiraID  string           `json:"developer_jira_id"`
-	RepoURLField     string           `json:"repo_url_field"`
-	ProjectKeys      []string         `json:"project_keys"`
-	TaskStatusMap    TaskStatusMap    `json:"task_status_map"`
-	SubtaskStatusMap SubtaskStatusMap `json:"subtask_status_map"`
+	BaseURL          string           `yaml:"base_url"`
+	Email            string           `yaml:"email"`
+	ArchitectJiraID  string           `yaml:"architect_jira_id"`
+	DeveloperJiraID  string           `yaml:"developer_jira_id"`
+	RepoURLField     string           `yaml:"repo_url_field"`
+	ProjectKeys      []string         `yaml:"project_keys"`
+	TaskStatusMap    TaskStatusMap    `yaml:"task_status_map"`
+	SubtaskStatusMap SubtaskStatusMap `yaml:"subtask_status_map"`
 }
 
 func (j JiraConfig) Validate() error {
@@ -195,37 +196,65 @@ func validateNoOverlap(scope string, buckets map[string]StatusBucket) error {
 }
 
 type LLMRoleConfig struct {
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	AllowedTools   string `json:"allowed_tools"`
-	PermissionMode string `json:"permission_mode"`
-	TimeoutSec     int    `json:"timeout_sec,omitempty"`
+	Provider       string `yaml:"provider"`
+	Model          string `yaml:"model"`
+	AllowedTools   string `yaml:"allowed_tools"`
+	PermissionMode string `yaml:"permission_mode"`
+	TimeoutSec     int    `yaml:"timeout_sec,omitempty"`
 }
 
 type LLMConfig struct {
-	Arch LLMRoleConfig `json:"arch"`
-	Code LLMRoleConfig `json:"code"`
+	Arch LLMRoleConfig `yaml:"arch"`
+	Code LLMRoleConfig `yaml:"code"`
 }
 
 // ServerConfig holds HTTP listener + FIFO dispatch settings.
 // MaxConcurrency defaults to 1 (strict serial). Full queue → drop + log.
 type ServerConfig struct {
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	MaxConcurrency int    `json:"max_concurrency"`
-	QueueSize      int    `json:"queue_size"`
+	Host           string `yaml:"host"`
+	Port           int    `yaml:"port"`
+	MaxConcurrency int    `yaml:"max_concurrency"`
+	QueueSize      int    `yaml:"queue_size"`
 }
 
-// Config is the validated on-disk config.json shape. Secrets are
+// DatabaseConfig names the external Postgres velocity connects to.
+// Host + password come from DBHostEnv / DBPasswordEnv, never config.yaml.
+type DatabaseConfig struct {
+	Port    int    `yaml:"port"`
+	User    string `yaml:"user"`
+	Name    string `yaml:"name"`
+	SSLMode string `yaml:"sslmode"`
+}
+
+func (d DatabaseConfig) Validate() error {
+	if d.Port <= 0 || d.Port > 65535 {
+		return fmt.Errorf("database.port out of range: %d", d.Port)
+	}
+	if d.User == "" {
+		return errors.New("database.user is required")
+	}
+	if d.Name == "" {
+		return errors.New("database.name is required")
+	}
+	return nil
+}
+
+// Config is the validated on-disk config.yaml shape. Secrets are
 // sourced from env vars (see secrets.go), not written to disk.
 type Config struct {
-	Jira     JiraConfig   `json:"jira"`
-	LLM      LLMConfig    `json:"llm"`
-	Server   ServerConfig `json:"server"`
-	LogLevel string       `json:"log_level"`
+	Jira     JiraConfig     `yaml:"jira"`
+	LLM      LLMConfig      `yaml:"llm"`
+	Server   ServerConfig   `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+	LogLevel string         `yaml:"log_level"`
 }
 
-func (c Config) Validate() error { return c.Jira.Validate() }
+func (c Config) Validate() error {
+	if err := c.Jira.Validate(); err != nil {
+		return err
+	}
+	return c.Database.Validate()
+}
 
 func (c *Config) applyDefaults() {
 	if c.LLM.Arch.Provider == "" {
@@ -270,6 +299,18 @@ func (c *Config) applyDefaults() {
 	if c.Server.QueueSize < 1 {
 		c.Server.QueueSize = 1024
 	}
+	if c.Database.Port == 0 {
+		c.Database.Port = 5432
+	}
+	if c.Database.User == "" {
+		c.Database.User = "velocity"
+	}
+	if c.Database.Name == "" {
+		c.Database.Name = "velocity"
+	}
+	if c.Database.SSLMode == "" {
+		c.Database.SSLMode = "disable"
+	}
 	if c.LogLevel == "" {
 		c.LogLevel = "INFO"
 	}
@@ -282,7 +323,7 @@ var (
 )
 
 // loadConfig is called by SetDir. Missing file degrades to setup mode;
-// invalid JSON / failed validation → loadError set.
+// invalid YAML / failed validation → loadError set.
 func loadConfig() {
 	current = nil
 	loadError = ""
@@ -296,8 +337,8 @@ func loadConfig() {
 		return
 	}
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		loadError = fmt.Sprintf("invalid JSON in config file: %v", err)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		loadError = fmt.Sprintf("invalid YAML in config file: %v", err)
 		return
 	}
 	cfg.applyDefaults()
@@ -312,14 +353,14 @@ func Get() *Config { return current }
 
 func LoadError() string { return loadError }
 
-// Reload re-reads config.json from disk.
+// Reload re-reads config.yaml from disk.
 func Reload() error {
 	loadConfig()
 	if current == nil && loadError != "" {
 		return errors.New(loadError)
 	}
 	if current == nil {
-		return errors.New("config.json not found at " + ConfigPath())
+		return errors.New("config.yaml not found at " + ConfigPath())
 	}
 	return nil
 }
@@ -332,7 +373,7 @@ func Save(cfg *Config) error {
 	if err := EnsureDir(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}

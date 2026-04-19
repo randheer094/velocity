@@ -180,24 +180,24 @@ func TestLoadConfigMissingFile(t *testing.T) {
 	}
 }
 
-func TestLoadConfigInvalidJSON(t *testing.T) {
+func TestLoadConfigInvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("foo: [unclosed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	SetDir(dir)
 	defer SetDir(t.TempDir())
 	if Get() != nil {
-		t.Errorf("expected nil config for invalid JSON")
+		t.Errorf("expected nil config for invalid YAML")
 	}
-	if !strings.Contains(LoadError(), "invalid JSON") {
-		t.Errorf("expected invalid JSON error, got %q", LoadError())
+	if !strings.Contains(LoadError(), "invalid YAML") {
+		t.Errorf("expected invalid YAML error, got %q", LoadError())
 	}
 }
 
 func TestLoadConfigInvalidValidation(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"jira":{}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("jira: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	SetDir(dir)

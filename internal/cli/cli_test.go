@@ -69,7 +69,7 @@ func TestRunSetupWithoutToken(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
 	t.Setenv(config.JiraTokenEnv, "")
-	err := runSetup(true)
+	err := runSetup()
 	if err == nil || !strings.Contains(err.Error(), config.JiraTokenEnv) {
 		t.Errorf("expected token-required error, got %v", err)
 	}
@@ -102,13 +102,13 @@ func TestReadAndWritePid(t *testing.T) {
 	}
 }
 
-func TestRunSetupEditFormFails(t *testing.T) {
+func TestRunSetupFormFails(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
 	t.Setenv(config.JiraTokenEnv, "tok")
-	// edit=true + token set forces past the early returns; without a TTY
-	// the huh form errors at Run(), which is what we're exercising.
-	_ = runSetup(true)
+	// token set forces past the early returns; without a TTY the huh form
+	// errors at Run(), which is what we're exercising.
+	_ = runSetup()
 }
 
 func writeValidConfig(t *testing.T) {
@@ -144,14 +144,6 @@ func writeValidConfig(t *testing.T) {
 	}
 }
 
-func TestRunSetupAlreadyConfigured(t *testing.T) {
-	dir := t.TempDir()
-	config.SetDir(dir)
-	writeValidConfig(t)
-	if err := runSetup(false); err != nil {
-		t.Errorf("runSetup: %v", err)
-	}
-}
 
 func TestNewRootCmd(t *testing.T) {
 	root := NewRootCmd()
@@ -400,14 +392,14 @@ func TestNewStartCmdMissingConfig(t *testing.T) {
 func TestNewStartCmdInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
-	if err := os.WriteFile(config.ConfigPath(), []byte("{not json"), 0o644); err != nil {
+	if err := os.WriteFile(config.ConfigPath(), []byte("foo: [unclosed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir) // reload
 	cmd := newStartCmd()
 	err := cmd.RunE(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "setup --edit") {
-		t.Fatalf("expected edit-hint error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "setup") {
+		t.Fatalf("expected setup-hint error, got %v", err)
 	}
 }
 

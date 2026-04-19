@@ -21,7 +21,7 @@ func TestSetDirAndPaths(t *testing.T) {
 	if WorkspaceDir != filepath.Join(dir, "workspace") {
 		t.Errorf("WorkspaceDir = %q", WorkspaceDir)
 	}
-	if ConfigPath() != filepath.Join(dir, "config.json") {
+	if ConfigPath() != filepath.Join(dir, "config.yaml") {
 		t.Errorf("ConfigPath = %q", ConfigPath())
 	}
 	if PidfilePath() != filepath.Join(dir, "daemon.pid") {

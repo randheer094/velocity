@@ -38,8 +38,8 @@ names (e.g. `DEV FAILED`) — never as an internal symbol.
 ## Naming
 
 - Binary: `velocity`. Module: `github.com/randheer094/velocity`.
-- Data dir: `~/.velocity` (override `--dir`). Only two subdirs:
-  `data/` (Postgres cluster) and `workspace/` (per-ticket clones).
+- Data dir: `~/.velocity` (override `--dir`). Holds `workspace/`
+  (per-ticket clones) and the daemon pid/log. Postgres is external.
 - IDs are Jira issue keys. Plans key on parent key; `code_tasks`
   rows key on sub-task key; workspaces named `workspace/<KEY>/`.
   Git branches **must** equal the sub-task key exactly.
@@ -77,7 +77,8 @@ names (e.g. `DEV FAILED`) — never as an internal symbol.
   --output-format text`). Per-role options from `LLMRoleConfig`.
 - **`internal/config/`** — config loader + paths + secret env var
   names (`JIRA_API_TOKEN`, `GH_TOKEN`, `JIRA_WEBHOOK_SECRET`,
-  `GH_WEBHOOK_SECRET`). Setup is the only writer of `config.json`.
+  `GH_WEBHOOK_SECRET`, `VELOCITY_DB_HOST`, `VELOCITY_DB_PASSWORD`).
+  Setup is the only writer of `config.json`.
 - **`internal/jira/`** — REST client + shared singleton. No
   orchestration.
 - **`internal/github/`** — REST client. HMAC verification lives in
@@ -89,9 +90,13 @@ names (e.g. `DEV FAILED`) — never as an internal symbol.
   speaks in canonicals.
 - **`internal/data/`** — `Plan` / `CodeTask` value types, keyed on
   Jira issue keys. No I/O.
-- **`internal/db/`** — embedded Postgres + repositories. Schema is
-  `CREATE TABLE IF NOT EXISTS` only — no ALTER, no migrations. Wipe
-  `~/.velocity/data/` to pick up schema changes.
+- **`internal/db/`** — pgx pool + repositories against an external
+  Postgres (host/password from env, other fields from
+  `config.Database`). Schema evolves via forward-only numbered
+  migrations embedded from `internal/db/migrations/NNNN_*.sql`;
+  each runs in its own transaction and is recorded in
+  `schema_migrations`. Never edit a shipped migration — add a new
+  one.
 
 ## Agent boundaries
 

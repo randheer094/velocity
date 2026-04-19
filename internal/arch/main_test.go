@@ -117,7 +117,7 @@ esac
 
 	fakeJira = httptest.NewServer(http.HandlerFunc(fakeJiraHandler))
 	cfg := strings.ReplaceAll(cfgJSON, "https://example.atlassian.net", fakeJira.URL)
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
 		panic(err)
 	}
 	config.SetDir(dir)
@@ -125,7 +125,7 @@ esac
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := db.Start(ctx, filepath.Join(dir, "db")); err != nil {
+	if err := db.Start(ctx, config.Get().Database); err != nil {
 		os.Stderr.WriteString("arch tests: db skipped: " + err.Error() + "\n")
 	} else {
 		dbReady = true

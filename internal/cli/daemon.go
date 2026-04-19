@@ -23,7 +23,7 @@ func requireConfig() error {
 		return nil
 	}
 	if e := config.LoadError(); e != "" {
-		return fmt.Errorf("%s\nFix the config or re-run `velocity setup --edit`", e)
+		return fmt.Errorf("%s\nFix the config or re-run `velocity setup`", e)
 	}
 	return errors.New("velocity is not configured. Run `velocity setup` first")
 }

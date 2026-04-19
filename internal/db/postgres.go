@@ -1,4 +1,4 @@
-// Package db owns the embedded Postgres cluster and repositories.
+// Package db owns the external Postgres connection pool and repositories.
 // Shared() returns nil until Start() has finished.
 package db
 
@@ -6,67 +6,61 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"path/filepath"
+	"net/url"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-const (
-	pgUser     = "velocity"
-	pgPassword = "velocity"
-	pgDatabase = "velocity"
-	pgVersion  = embeddedpostgres.V16
+	"github.com/randheer094/velocity/internal/config"
 )
 
 var (
 	mu     sync.RWMutex
-	pg     *embeddedpostgres.EmbeddedPostgres
 	pool   *pgxpool.Pool
-	port   uint32
 	dataOK bool
 )
 
-// Start boots the cluster, opens the pool, and runs CREATE-TABLE DDL.
+// Start opens the pool against the DB named in cfg (host + password
+// from DBHostEnv / DBPasswordEnv) and runs any unapplied migrations.
 // Safe to call twice — the second call is a no-op.
-func Start(ctx context.Context, dataDir string) error {
+func Start(ctx context.Context, cfg config.DatabaseConfig) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if dataOK {
 		return nil
 	}
 
-	p, err := pickFreePort()
-	if err != nil {
-		return fmt.Errorf("pick port: %w", err)
+	host := os.Getenv(config.DBHostEnv)
+	if host == "" {
+		return fmt.Errorf("%s must be exported", config.DBHostEnv)
+	}
+	password := os.Getenv(config.DBPasswordEnv)
+	if password == "" {
+		return fmt.Errorf("%s must be exported", config.DBPasswordEnv)
 	}
 
-	cfg := embeddedpostgres.DefaultConfig().
-		Version(pgVersion).
-		Username(pgUser).
-		Password(pgPassword).
-		Database(pgDatabase).
-		Port(p).
-		BinariesPath(filepath.Join(dataDir, "binaries")).
-		DataPath(filepath.Join(dataDir, "pgdata")).
-		RuntimePath(filepath.Join(dataDir, "runtime")).
-		CachePath(filepath.Join(dataDir, "cache")).
-		StartTimeout(90 * time.Second)
-
-	inst := embeddedpostgres.NewDatabase(cfg)
-	if err := inst.Start(); err != nil {
-		return fmt.Errorf("start embedded postgres: %w", err)
+	port := cfg.Port
+	if v := os.Getenv(config.DBPortEnv); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil || p <= 0 || p > 65535 {
+			return fmt.Errorf("%s is not a valid port: %q", config.DBPortEnv, v)
+		}
+		port = p
 	}
 
-	dsn := fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable",
-		pgUser, pgPassword, p, pgDatabase)
+	dsn := (&url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(cfg.User, password),
+		Host:     fmt.Sprintf("%s:%d", host, port),
+		Path:     "/" + cfg.Name,
+		RawQuery: "sslmode=" + url.QueryEscape(cfg.SSLMode),
+	}).String()
 
 	poolCfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		_ = inst.Stop()
 		return fmt.Errorf("parse pool config: %w", err)
 	}
 	poolCfg.MaxConns = 8
@@ -75,29 +69,24 @@ func Start(ctx context.Context, dataDir string) error {
 	defer cancel()
 	pl, err := pgxpool.NewWithConfig(poolCtx, poolCfg)
 	if err != nil {
-		_ = inst.Stop()
 		return fmt.Errorf("open pool: %w", err)
 	}
 	if err := pl.Ping(poolCtx); err != nil {
 		pl.Close()
-		_ = inst.Stop()
 		return fmt.Errorf("ping pool: %w", err)
 	}
 
 	if err := migrate(poolCtx, pl); err != nil {
 		pl.Close()
-		_ = inst.Stop()
 		return fmt.Errorf("migrate: %w", err)
 	}
 
-	pg = inst
 	pool = pl
-	port = p
 	dataOK = true
 	return nil
 }
 
-// Stop tears down the pool and cluster. Safe to call twice.
+// Stop closes the pool. Safe to call twice.
 func Stop() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -107,14 +96,9 @@ func Stop() error {
 	if pool != nil {
 		pool.Close()
 	}
-	var err error
-	if pg != nil {
-		err = pg.Stop()
-	}
 	pool = nil
-	pg = nil
 	dataOK = false
-	return err
+	return nil
 }
 
 // Shared returns the package-level pool; nil until Start has finished.
@@ -126,12 +110,3 @@ func Shared() *pgxpool.Pool {
 
 // ErrNotStarted means a repo call was made before Start.
 var ErrNotStarted = errors.New("db: not started")
-
-func pickFreePort() (uint32, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return uint32(l.Addr().(*net.TCPAddr).Port), nil
-}

@@ -2,72 +2,130 @@ package db
 
 import (
 	"context"
+	"embed"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS plans (
-    parent_jira_key    TEXT PRIMARY KEY,
-    name               TEXT NOT NULL,
-    repo_url           TEXT NOT NULL,
-    active_wave_idx    INT  NOT NULL DEFAULT 0,
-    status             TEXT NOT NULL DEFAULT 'active',
-    last_error         TEXT NOT NULL DEFAULT '',
-    last_error_stage   TEXT NOT NULL DEFAULT '',
-    failed_at          TIMESTAMPTZ,
-    completed_at       TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
-CREATE TABLE IF NOT EXISTS plan_tasks (
-    parent_jira_key   TEXT NOT NULL REFERENCES plans(parent_jira_key) ON DELETE CASCADE,
-    task_id           TEXT NOT NULL,
-    position          INT  NOT NULL,
-    title             TEXT NOT NULL,
-    description       TEXT NOT NULL DEFAULT '',
-    jira_key          TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (parent_jira_key, task_id)
-);
-CREATE INDEX IF NOT EXISTS plan_tasks_jira_key_idx ON plan_tasks (jira_key);
+const migrationsTable = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    INT         PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);`
 
-CREATE TABLE IF NOT EXISTS plan_waves (
-    parent_jira_key   TEXT NOT NULL REFERENCES plans(parent_jira_key) ON DELETE CASCADE,
-    wave_idx          INT  NOT NULL,
-    position          INT  NOT NULL,
-    task_id           TEXT NOT NULL,
-    jira_key          TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (parent_jira_key, wave_idx, position)
-);
+type migration struct {
+	version int
+	name    string
+	sql     string
+}
 
-CREATE TABLE IF NOT EXISTS plan_task_deps (
-    parent_jira_key     TEXT NOT NULL REFERENCES plans(parent_jira_key) ON DELETE CASCADE,
-    task_id             TEXT NOT NULL,
-    depends_on_task_id  TEXT NOT NULL,
-    PRIMARY KEY (parent_jira_key, task_id, depends_on_task_id)
-);
-CREATE INDEX IF NOT EXISTS plan_task_deps_depends_idx
-    ON plan_task_deps (parent_jira_key, depends_on_task_id);
-
-CREATE TABLE IF NOT EXISTS code_tasks (
-    issue_key          TEXT PRIMARY KEY,
-    parent_jira_key    TEXT NOT NULL,
-    repo_url           TEXT NOT NULL,
-    title              TEXT NOT NULL,
-    description        TEXT NOT NULL DEFAULT '',
-    branch             TEXT NOT NULL DEFAULT '',
-    pr_url             TEXT NOT NULL DEFAULT '',
-    status             TEXT NOT NULL,
-    error              TEXT NOT NULL DEFAULT '',
-    last_error_stage   TEXT NOT NULL DEFAULT '',
-    failed_at          TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-`
-
+// migrate applies every embedded `NNNN_*.sql` whose version is not yet
+// recorded in schema_migrations. Each migration runs inside a single
+// transaction; Postgres supports transactional DDL so a failed file
+// leaves no partial state behind.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, schema)
-	return err
+	if _, err := pool.Exec(ctx, migrationsTable); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	applied, err := appliedVersions(ctx, pool)
+	if err != nil {
+		return err
+	}
+
+	migs, err := loadMigrations()
+	if err != nil {
+		return err
+	}
+
+	for _, m := range migs {
+		if applied[m.version] {
+			continue
+		}
+		if err := applyMigration(ctx, pool, m); err != nil {
+			return err
+		}
+		slog.Info("applied migration", "version", m.version, "name", m.name)
+	}
+	return nil
+}
+
+func appliedVersions(ctx context.Context, pool *pgxpool.Pool) (map[int]bool, error) {
+	rows, err := pool.Query(ctx, "SELECT version FROM schema_migrations")
+	if err != nil {
+		return nil, fmt.Errorf("read schema_migrations: %w", err)
+	}
+	defer rows.Close()
+	out := map[int]bool{}
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out[v] = true
+	}
+	return out, rows.Err()
+}
+
+func applyMigration(ctx context.Context, pool *pgxpool.Pool, m migration) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin %s: %w", m.name, err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, m.sql); err != nil {
+		return fmt.Errorf("apply %s: %w", m.name, err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", m.version); err != nil {
+		return fmt.Errorf("record %s: %w", m.name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit %s: %w", m.name, err)
+	}
+	return nil
+}
+
+func loadMigrations() ([]migration, error) {
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("read migrations dir: %w", err)
+	}
+	var out []migration
+	seen := map[int]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".sql") {
+			continue
+		}
+		// Filenames must be "NNNN_description.sql". Anything else is a
+		// packaging mistake and should fail loudly at start, not silently.
+		parts := strings.SplitN(name, "_", 2)
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("migration %q: expected NNNN_description.sql", name)
+		}
+		v, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("migration %q: bad version prefix: %w", name, err)
+		}
+		if prev, dup := seen[v]; dup {
+			return nil, fmt.Errorf("migration version %d used by both %s and %s", v, prev, name)
+		}
+		seen[v] = name
+		body, err := fs.ReadFile(migrationsFS, "migrations/"+name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, migration{version: v, name: name, sql: string(body)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].version < out[j].version })
+	return out, nil
 }
