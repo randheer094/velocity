@@ -12,7 +12,7 @@ root="$(cd "$here/.." && pwd)"
 cd "$root"
 
 cleanup() {
-  docker compose down >/dev/null 2>&1 || true
+  docker compose down -t 30 >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
