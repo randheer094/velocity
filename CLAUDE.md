@@ -18,7 +18,7 @@ agent. See [README.md](./README.md) for install/setup, and
 3. **Shared libraries stay agent-agnostic.** No webhook handlers, no CLI imports, no cross-agent knowledge in `internal/{config,jira,github,git,llm,status,data,db}`.
 4. **Jira issue keys are IDs.** DB rows, workspaces, git branches, PR titles all key off the issue key directly. Sub-task branch ≡ sub-task key.
 5. **Embedded Postgres; workspaces ephemeral.** State under `~/.velocity/data/`; clones under `~/.velocity/workspace/<KEY>/`.
-6. **Config unified; credentials in keyring.** One `config.json`; service `velocity` holds tokens. Setup is CLI-only.
+6. **Config unified; credentials in env vars.** One `config.json`; secrets (`JIRA_API_TOKEN`, `GH_TOKEN`, `JIRA_WEBHOOK_SECRET`, `GH_WEBHOOK_SECRET`) come from the environment. Setup is CLI-only.
 7. **FIFO dispatch with parallel cap.** Handlers enqueue and return 202; workers drain the queue.
 8. **Failures are first-class states.** `PLANNING FAILED`, `DEV FAILED` (`code_failed`), `DISMISSED` are real statuses. Retry = re-assign; dismiss is terminal.
 
@@ -36,7 +36,7 @@ internal/
 ├── github/                 REST client
 ├── git/                    clone / branch / commit / push
 ├── llm/                    Claude CLI provider
-├── config/                 Config + paths + keyring
+├── config/                 Config + paths + secret env var names
 ├── data/                   Plan / CodeTask value types
 ├── db/                     embedded Postgres + pgx pool + repositories
 └── status/                 canonical → Jira status name helpers

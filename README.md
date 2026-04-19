@@ -89,12 +89,9 @@ Make sure the destination is on `PATH`.
 ## Setup
 
 `velocity setup` is an interactive [huh](https://github.com/charmbracelet/huh)
-form. It prompts for every credential and config value and writes:
-
-- Secrets → OS keyring under service `velocity`:
-  `JIRA_API_TOKEN`, `GITHUB_TOKEN`, `JIRA_WEBHOOK_SECRET`,
-  `GITHUB_WEBHOOK_SECRET`.
-- Everything else → `~/.velocity/config.json`.
+form. It prompts for non-secret config and writes
+`~/.velocity/config.json`. Secrets come from environment variables
+— export them before `velocity start`.
 
 ```bash
 velocity setup          # first-time onboarding
@@ -104,15 +101,31 @@ velocity setup --edit   # re-prompt (pre-filled with existing values)
 The form covers:
 
 - Jira base URL (e.g. `https://acme.atlassian.net`).
-- Jira user email + API token.
+- Jira user email.
 - Architect and developer `accountId`s.
 - Jira custom field ID for the repo URL (e.g. `customfield_10050`).
-- Jira + GitHub webhook shared secrets (leave blank to disable
-  verification — dev only).
-- GitHub personal access token.
 - Per-bucket Jira status names (comma-separated list — first is the
   transition target, the rest are aliases that resolve *into* the
   bucket on reads). See [Configuration](#configuration).
+
+### Secrets (env vars)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `JIRA_API_TOKEN` | yes | Jira REST API auth (basic auth, paired with `jira.email`). |
+| `GH_TOKEN` | yes | GitHub REST API + `git push` auth (repo scope). |
+| `JIRA_WEBHOOK_SECRET` | no | Shared secret Jira uses to sign webhook bodies (`X-Hub-Signature`). Leave unset to disable verification (dev only). |
+| `GH_WEBHOOK_SECRET` | no | Shared secret GitHub uses to sign webhook bodies (`X-Hub-Signature-256`). Leave unset to disable verification (dev only). |
+
+Example:
+
+```bash
+export JIRA_API_TOKEN="..."
+export GH_TOKEN="ghp_..."
+export JIRA_WEBHOOK_SECRET="..."
+export GH_WEBHOOK_SECRET="..."
+velocity start
+```
 
 ## Run the daemon
 
@@ -156,7 +169,7 @@ directory (default `~/.velocity`).
 
 `~/.velocity/config.json` is written by `velocity setup` and can be
 hand-edited (restart with `velocity restart`). Secrets are **not**
-in this file — they live in the OS keyring.
+in this file — see [Secrets (env vars)](#secrets-env-vars).
 
 ```jsonc
 {
@@ -409,8 +422,9 @@ the supervision, not velocity's detach path.
 launchctl load ~/Library/LaunchAgents/com.velocity.agent.plist
 ```
 
-The OS keyring is the login keychain, so the user that owns the
-LaunchAgent must match the user that ran `velocity setup`.
+Secrets are read from the LaunchAgent's environment — either set
+them in `EnvironmentVariables` inside the plist, or launch velocity
+via a wrapper script that `export`s them first.
 
 ### Webhook reachability
 
@@ -424,8 +438,8 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 | Symptom | Check |
 |---|---|
 | `velocity status` says stopped right after `start` | `velocity logs` — usually a config load or Postgres startup error. |
-| Jira webhook returns 401 | Shared secret mismatch. Re-run `velocity setup --edit` and update the Jira webhook config. |
-| GitHub webhook returns 401 | Same as above for `GITHUB_WEBHOOK_SECRET`. |
+| Jira webhook returns 401 | `JIRA_WEBHOOK_SECRET` mismatch. Re-export and restart; confirm the same value is set on the Jira webhook. |
+| GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |
 | Sub-task PR never opens | `code: stage failed`; usually a `git push` auth failure or a Claude timeout. Bump `llm.code.timeout_sec`. |
 | Queue drops under load | Raise `server.queue_size`, or `server.max_concurrency`, or both. |

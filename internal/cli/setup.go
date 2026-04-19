@@ -14,7 +14,7 @@ func newSetupCmd() *cobra.Command {
 	var edit bool
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Interactive credential + config onboarding",
+		Short: "Interactive config onboarding (secrets come from env vars)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSetup(edit)
 		},
@@ -30,13 +30,9 @@ func runSetup(edit bool) error {
 		existing = &config.Config{}
 	}
 
-	token, _ := config.GetSecret(config.JiraTokenKey)
-	ghToken, _ := config.GetSecret(config.GithubTokenKey)
-	jiraSecret, _ := config.GetSecret(config.JiraWebhookSecretKey)
-	ghSecret, _ := config.GetSecret(config.GithubWebhookSecretKey)
-
-	if !edit && cfg != nil && token != "" && ghToken != "" {
+	if !edit && cfg != nil {
 		fmt.Println("velocity already configured. Re-run with --edit to modify.")
+		printSecretReminder()
 		return nil
 	}
 
@@ -65,9 +61,6 @@ func runSetup(edit bool) error {
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().Title("Jira email").Value(&email).Validate(nonEmpty),
-			huh.NewInput().Title("Jira API token").EchoMode(huh.EchoModePassword).Value(&token).Validate(nonEmpty),
-		),
-		huh.NewGroup(
 			huh.NewInput().Title("Jira base URL").Placeholder("https://your-org.atlassian.net").Value(&baseURL).Validate(nonEmpty),
 			huh.NewInput().Title("Architect Jira accountId").Value(&archID).Validate(nonEmpty),
 			huh.NewInput().Title("Developer Jira accountId").Value(&devID).Validate(nonEmpty),
@@ -77,10 +70,6 @@ func runSetup(edit bool) error {
 				Placeholder("customfield_10050").
 				Value(&repoField).
 				Validate(nonEmpty),
-			huh.NewInput().
-				Title("Jira webhook secret (optional)").
-				Description("HMAC-SHA256 secret Jira signs the body with. Sent as X-Hub-Signature: sha256=<hex>").
-				Value(&jiraSecret),
 		),
 		huh.NewGroup(
 			huh.NewNote().Title("Parent task workflow statuses").Description(bucketDesc),
@@ -100,27 +89,9 @@ func runSetup(edit bool) error {
 			huh.NewInput().Title("DONE statuses").Value(&subDone).Validate(nonEmpty),
 			huh.NewInput().Title("DISMISSED statuses").Value(&subDismissed).Validate(nonEmpty),
 		),
-		huh.NewGroup(
-			huh.NewNote().Title("GitHub"),
-			huh.NewInput().Title("GitHub token (repo scope)").EchoMode(huh.EchoModePassword).Value(&ghToken).Validate(nonEmpty),
-			huh.NewInput().Title("GitHub webhook secret (optional, for HMAC verification)").Value(&ghSecret),
-		),
 	)
 	if err := form.Run(); err != nil {
 		return err
-	}
-
-	if err := config.SetSecret(config.JiraTokenKey, token); err != nil {
-		return fmt.Errorf("save jira token: %w", err)
-	}
-	if err := config.SetSecret(config.GithubTokenKey, ghToken); err != nil {
-		return fmt.Errorf("save github token: %w", err)
-	}
-	if err := config.SetSecret(config.JiraWebhookSecretKey, jiraSecret); err != nil {
-		return fmt.Errorf("save jira webhook secret: %w", err)
-	}
-	if err := config.SetSecret(config.GithubWebhookSecretKey, ghSecret); err != nil {
-		return fmt.Errorf("save github webhook secret: %w", err)
 	}
 
 	newCfg := &config.Config{
@@ -151,8 +122,18 @@ func runSetup(edit bool) error {
 	if err := config.Save(newCfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	fmt.Println("velocity configured. Start the server with: velocity start")
+	fmt.Println("velocity configured.")
+	printSecretReminder()
 	return nil
+}
+
+func printSecretReminder() {
+	fmt.Println()
+	fmt.Println("Export these env vars before `velocity start`:")
+	fmt.Printf("  %s            (required)\n", config.JiraTokenEnv)
+	fmt.Printf("  %s                 (required)\n", config.GithubTokenEnv)
+	fmt.Printf("  %s    (optional — HMAC verification)\n", config.JiraWebhookSecretEnv)
+	fmt.Printf("  %s      (optional — HMAC verification)\n", config.GithubWebhookSecretEnv)
 }
 
 func nonEmpty(s string) error {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -42,15 +43,15 @@ func DefaultBranch(repoDir string) (string, error) {
 	return out, nil
 }
 
-// ConfigureAuthenticatedRemote embeds GITHUB_TOKEN in origin's URL so
+// ConfigureAuthenticatedRemote embeds GH_TOKEN in origin's URL so
 // `git push` runs non-interactively.
 func ConfigureAuthenticatedRemote(repoDir, repoFullName string) error {
-	token, err := config.GetSecret(config.GithubTokenKey)
-	if err != nil || token == "" {
-		return fmt.Errorf("GITHUB_TOKEN not set in keyring")
+	token := os.Getenv(config.GithubTokenEnv)
+	if token == "" {
+		return fmt.Errorf("%s env var not set", config.GithubTokenEnv)
 	}
 	authURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", token, repoFullName)
-	_, err = run(repoDir, "remote", "set-url", "origin", authURL)
+	_, err := run(repoDir, "remote", "set-url", "origin", authURL)
 	return err
 }
 

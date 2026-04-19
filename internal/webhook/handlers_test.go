@@ -15,6 +15,14 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 )
 
+// Unset webhook secret env vars so tests default to HMAC-disabled.
+// Individual tests that exercise signature paths opt in via t.Setenv.
+func TestMain(m *testing.M) {
+	os.Unsetenv(config.JiraWebhookSecretEnv)
+	os.Unsetenv(config.GithubWebhookSecretEnv)
+	os.Exit(m.Run())
+}
+
 const goodConfig = `{
   "jira": {
     "base_url": "https://example.atlassian.net",

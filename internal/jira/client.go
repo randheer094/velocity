@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ type Client struct {
 	http    *http.Client
 }
 
-// New builds a Client from loaded config + keyring credentials.
+// New builds a Client from loaded config + JIRA_API_TOKEN env var.
 // Warns on missing creds so a partial install can still boot.
 func New() *Client {
 	cfg := config.Get()
@@ -39,7 +40,7 @@ func New() *Client {
 		baseURL = cfg.Jira.BaseURL
 		email = cfg.Jira.Email
 	}
-	token, _ := config.GetSecret(config.JiraTokenKey)
+	token := os.Getenv(config.JiraTokenEnv)
 
 	if baseURL == "" {
 		slog.Warn("jira.base_url not set; Jira operations will fail.")

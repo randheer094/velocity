@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/randheer094/velocity/internal/arch"
 	"github.com/randheer094/velocity/internal/code"
@@ -36,7 +37,7 @@ func (h JiraHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read body", http.StatusBadRequest)
 		return
 	}
-	secret, _ := config.GetSecret(config.JiraWebhookSecretKey)
+	secret := os.Getenv(config.JiraWebhookSecretEnv)
 	if !verifyHMACSHA256(secret, r.Header.Get(jiraSignatureHeader), body) {
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return

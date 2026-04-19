@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/randheer094/velocity/internal/code"
 	"github.com/randheer094/velocity/internal/config"
@@ -28,7 +29,7 @@ func (h GithubHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read body", http.StatusBadRequest)
 		return
 	}
-	secret, _ := config.GetSecret(config.GithubWebhookSecretKey)
+	secret := os.Getenv(config.GithubWebhookSecretEnv)
 	if !verifyHMACSHA256(secret, r.Header.Get(githubSignatureHeader), body) {
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return

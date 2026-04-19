@@ -18,12 +18,25 @@ import (
 
 const daemonEnvMarker = "VELOCITY_DAEMON_CHILD"
 
+func requireConfig() error {
+	if config.Get() != nil {
+		return nil
+	}
+	if e := config.LoadError(); e != "" {
+		return fmt.Errorf("%s\nFix the config or re-run `velocity setup --edit`", e)
+	}
+	return errors.New("velocity is not configured. Run `velocity setup` first")
+}
+
 func newStartCmd() *cobra.Command {
 	var foreground bool
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Run the webhook server (detached by default)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireConfig(); err != nil {
+				return err
+			}
 			if foreground || os.Getenv(daemonEnvMarker) == "1" {
 				return server.Run()
 			}
@@ -57,6 +70,9 @@ func newRestartCmd() *cobra.Command {
 		Use:   "restart",
 		Short: "Stop then start the daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireConfig(); err != nil {
+				return err
+			}
 			if pid, _ := readPid(); pid != 0 {
 				if err := stop(pid); err != nil {
 					return err

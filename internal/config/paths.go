@@ -1,4 +1,4 @@
-// Package config owns Config, paths, and keyring credentials.
+// Package config owns Config, paths, and secret env var names.
 // AgentDir / DataDir / WorkspaceDir are set once via SetDir at startup.
 package config
 

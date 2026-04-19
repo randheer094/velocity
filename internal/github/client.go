@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -25,11 +26,11 @@ type Client struct {
 	http  *http.Client
 }
 
-// New builds a Client using GITHUB_TOKEN from the keyring.
+// New builds a Client using the GH_TOKEN env var.
 func New() *Client {
-	token, _ := config.GetSecret(config.GithubTokenKey)
+	token := os.Getenv(config.GithubTokenEnv)
 	if token == "" {
-		slog.Warn("GITHUB_TOKEN missing; GitHub operations will fail.")
+		slog.Warn("GH_TOKEN missing; GitHub operations will fail.")
 	}
 	return &Client{token: token, http: &http.Client{Timeout: requestTimeout}}
 }

@@ -166,8 +166,8 @@ type ServerConfig struct {
 	QueueSize      int    `json:"queue_size"`
 }
 
-// Config is the validated on-disk config.json shape. Secrets live in
-// the OS keyring, not here.
+// Config is the validated on-disk config.json shape. Secrets are
+// sourced from env vars (see secrets.go), not written to disk.
 type Config struct {
 	Jira     JiraConfig   `json:"jira"`
 	LLM      LLMConfig    `json:"llm"`

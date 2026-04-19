@@ -21,11 +21,7 @@ func sign(secret string, body []byte) string {
 func TestJiraHandlerBadSignature(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
-
-	if err := config.SetSecret(config.JiraWebhookSecretKey, "shh"); err != nil {
-		t.Skipf("keyring unavailable: %v", err)
-	}
-	defer config.DeleteSecret(config.JiraWebhookSecretKey)
+	t.Setenv(config.JiraWebhookSecretEnv, "shh")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/jira", bytes.NewReader([]byte(`{"issue":{"key":"X-1"}}`)))
@@ -39,11 +35,7 @@ func TestJiraHandlerBadSignature(t *testing.T) {
 func TestJiraHandlerGoodSignature(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
-
-	if err := config.SetSecret(config.JiraWebhookSecretKey, "shh"); err != nil {
-		t.Skipf("keyring unavailable: %v", err)
-	}
-	defer config.DeleteSecret(config.JiraWebhookSecretKey)
+	t.Setenv(config.JiraWebhookSecretEnv, "shh")
 
 	body := []byte(`{"issue":{"key":"X-1","fields":{}}}`)
 	rec := httptest.NewRecorder()
@@ -56,10 +48,7 @@ func TestJiraHandlerGoodSignature(t *testing.T) {
 }
 
 func TestGithubHandlerBadSignature(t *testing.T) {
-	if err := config.SetSecret(config.GithubWebhookSecretKey, "shh"); err != nil {
-		t.Skipf("keyring unavailable: %v", err)
-	}
-	defer config.DeleteSecret(config.GithubWebhookSecretKey)
+	t.Setenv(config.GithubWebhookSecretEnv, "shh")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("{}")))

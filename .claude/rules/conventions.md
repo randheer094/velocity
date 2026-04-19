@@ -68,14 +68,16 @@ names (e.g. `DEV FAILED`) — never as an internal symbol.
 - Shutdown (SIGINT/SIGTERM): `http.Server.Shutdown` → `webhook.Drain`
   → `db.Stop`, all inside a 10 s budget.
 - No in-process setup endpoint, no runtime config reload. Rotate
-  credentials via stop → `velocity setup --edit` → start.
+  config via stop → `velocity setup --edit` → start. Rotate
+  secrets by re-exporting env vars and restarting.
 
 ## Shared library packages
 
 - **`internal/llm/`** — Claude CLI wrapper (`claude --print
   --output-format text`). Per-role options from `LLMRoleConfig`.
-- **`internal/config/`** — config loader + paths + keyring. Service
-  name is `"velocity"`. Setup is the only writer.
+- **`internal/config/`** — config loader + paths + secret env var
+  names (`JIRA_API_TOKEN`, `GH_TOKEN`, `JIRA_WEBHOOK_SECRET`,
+  `GH_WEBHOOK_SECRET`). Setup is the only writer of `config.json`.
 - **`internal/jira/`** — REST client + shared singleton. No
   orchestration.
 - **`internal/github/`** — REST client. HMAC verification lives in
@@ -123,5 +125,5 @@ in-memory state except `jira.Shared()`.
 - A web UI, dashboard, HTTP setup surface, or manual task-create
   endpoint.
 - New shared `internal/` packages beyond those listed above.
-- Per-agent config files or keyrings.
+- Per-agent config files, or on-disk secret stores — secrets come from env vars only.
 - `cmd/<other>/` binaries.

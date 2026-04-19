@@ -8,8 +8,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/zalando/go-keyring"
-
 	"github.com/randheer094/velocity/internal/config"
 )
 
@@ -81,7 +79,6 @@ func TestReadAndWritePid(t *testing.T) {
 }
 
 func TestRunSetupEditFormFails(t *testing.T) {
-	keyring.MockInit()
 	dir := t.TempDir()
 	config.SetDir(dir)
 	// edit=true forces past the "already configured" early return.
@@ -90,10 +87,8 @@ func TestRunSetupEditFormFails(t *testing.T) {
 	_ = runSetup(true)
 }
 
-func TestRunSetupAlreadyConfigured(t *testing.T) {
-	keyring.MockInit()
-	dir := t.TempDir()
-	config.SetDir(dir)
+func writeValidConfig(t *testing.T) {
+	t.Helper()
 	cfg := &config.Config{
 		Jira: config.JiraConfig{
 			BaseURL:         "https://x.atlassian.net",
@@ -122,12 +117,12 @@ func TestRunSetupAlreadyConfigured(t *testing.T) {
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.SetSecret(config.JiraTokenKey, "tok"); err != nil {
-		t.Fatal(err)
-	}
-	if err := config.SetSecret(config.GithubTokenKey, "gh"); err != nil {
-		t.Fatal(err)
-	}
+}
+
+func TestRunSetupAlreadyConfigured(t *testing.T) {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	writeValidConfig(t)
 	if err := runSetup(false); err != nil {
 		t.Errorf("runSetup: %v", err)
 	}
@@ -276,6 +271,7 @@ func TestStopGracefulSubprocess(t *testing.T) {
 func TestNewRestartCmdNoPid(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
+	writeValidConfig(t)
 	cmd := newRestartCmd()
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
@@ -285,9 +281,20 @@ func TestNewRestartCmdNoPid(t *testing.T) {
 	}
 }
 
+func TestNewRestartCmdMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	cmd := newRestartCmd()
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "velocity setup") {
+		t.Fatalf("expected setup-hint error, got %v", err)
+	}
+}
+
 func TestNewRestartCmdWithLivePid(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
+	writeValidConfig(t)
 	c := exec.Command("sleep", "30")
 	if err := c.Start(); err != nil {
 		t.Skipf("can't spawn sleep: %v", err)
@@ -341,6 +348,7 @@ func TestNewStartCmdForegroundFails(t *testing.T) {
 func TestNewStartCmdDetaches(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
+	writeValidConfig(t)
 	cmd := newStartCmd()
 	// Default flags: foreground=false, no daemon marker → goes to detach().
 	if err := cmd.RunE(cmd, nil); err != nil {
@@ -348,6 +356,33 @@ func TestNewStartCmdDetaches(t *testing.T) {
 	}
 	if pid, _ := readPid(); pid <= 0 {
 		t.Errorf("expected pidfile after start, got %d", pid)
+	}
+}
+
+func TestNewStartCmdMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	cmd := newStartCmd()
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "velocity setup") {
+		t.Fatalf("expected setup-hint error, got %v", err)
+	}
+	if _, statErr := os.Stat(config.PidfilePath()); !os.IsNotExist(statErr) {
+		t.Error("pidfile should not be written when config is missing")
+	}
+}
+
+func TestNewStartCmdInvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	if err := os.WriteFile(config.ConfigPath(), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.SetDir(dir) // reload
+	cmd := newStartCmd()
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "setup --edit") {
+		t.Fatalf("expected edit-hint error, got %v", err)
 	}
 }
 

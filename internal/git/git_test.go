@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zalando/go-keyring"
-
 	"github.com/randheer094/velocity/internal/config"
 )
 
@@ -182,7 +180,7 @@ func TestPushError(t *testing.T) {
 }
 
 func TestConfigureAuthenticatedRemoteMissingToken(t *testing.T) {
-	keyring.MockInit()
+	t.Setenv(config.GithubTokenEnv, "")
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
 	if err := Clone(remote, dst); err != nil {
@@ -194,10 +192,7 @@ func TestConfigureAuthenticatedRemoteMissingToken(t *testing.T) {
 }
 
 func TestConfigureAuthenticatedRemoteWithToken(t *testing.T) {
-	keyring.MockInit()
-	if err := config.SetSecret(config.GithubTokenKey, "abc"); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv(config.GithubTokenEnv, "abc")
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
 	if err := Clone(remote, dst); err != nil {
