@@ -170,12 +170,13 @@ func detach() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	if err := writePid(cmd.Process.Pid); err != nil {
+	pid := cmd.Process.Pid
+	if err := writePid(pid); err != nil {
 		return err
 	}
 	if err := cmd.Process.Release(); err != nil {
 		return err
 	}
-	fmt.Printf("started (pid %d)\n", cmd.Process.Pid)
+	fmt.Printf("started (pid %d)\n", pid)
 	return nil
 }

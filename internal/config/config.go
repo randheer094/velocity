@@ -105,12 +105,15 @@ func (s SubtaskStatusMap) validate() error {
 
 // JiraConfig holds Jira instance + status vocabulary config.
 // RepoURLField is read off the parent ticket (e.g. "customfield_10050").
+// ProjectKeys is the list of Jira projects setup fetched statuses from,
+// and is what GetProjectStatuses is unioned over if config is re-opened.
 type JiraConfig struct {
 	BaseURL          string           `json:"base_url"`
 	Email            string           `json:"email"`
 	ArchitectJiraID  string           `json:"architect_jira_id"`
 	DeveloperJiraID  string           `json:"developer_jira_id"`
 	RepoURLField     string           `json:"repo_url_field"`
+	ProjectKeys      []string         `json:"project_keys"`
 	TaskStatusMap    TaskStatusMap    `json:"task_status_map"`
 	SubtaskStatusMap SubtaskStatusMap `json:"subtask_status_map"`
 }
@@ -135,11 +138,58 @@ func (j JiraConfig) Validate() error {
 	if j.RepoURLField == "" {
 		return errors.New("jira.repo_url_field is required")
 	}
+	if len(j.ProjectKeys) == 0 {
+		return errors.New("jira.project_keys must have at least 1 entry")
+	}
 	if err := j.TaskStatusMap.validate(); err != nil {
 		return err
 	}
 	if err := j.SubtaskStatusMap.validate(); err != nil {
 		return err
+	}
+	if err := validateNoOverlap("task_status_map", taskBucketMap(j.TaskStatusMap)); err != nil {
+		return err
+	}
+	if err := validateNoOverlap("subtask_status_map", subtaskBucketMap(j.SubtaskStatusMap)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func taskBucketMap(m TaskStatusMap) map[string]StatusBucket {
+	return map[string]StatusBucket{
+		"new":                 m.New,
+		"planning":            m.Planning,
+		"planning_failed":     m.PlanningFailed,
+		"subtask_in_progress": m.SubtaskInProgress,
+		"done":                m.Done,
+		"dismissed":           m.Dismissed,
+	}
+}
+
+func subtaskBucketMap(m SubtaskStatusMap) map[string]StatusBucket {
+	return map[string]StatusBucket{
+		"new":         m.New,
+		"in_progress": m.InProgress,
+		"pr_open":     m.PROpen,
+		"code_failed": m.CodeFailed,
+		"done":        m.Done,
+		"dismissed":   m.Dismissed,
+	}
+}
+
+// validateNoOverlap rejects a status name appearing in two buckets of the
+// same workflow. Same name across task and subtask workflows is allowed.
+func validateNoOverlap(scope string, buckets map[string]StatusBucket) error {
+	owner := map[string]string{}
+	for bucket, b := range buckets {
+		for _, name := range b.All() {
+			k := strings.ToLower(name)
+			if prev, dup := owner[k]; dup && prev != bucket {
+				return fmt.Errorf("%s: status %q appears in both %s and %s", scope, name, prev, bucket)
+			}
+			owner[k] = bucket
+		}
 	}
 	return nil
 }

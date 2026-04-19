@@ -23,8 +23,19 @@ func TestNonEmpty(t *testing.T) {
 	}
 }
 
-func TestParseBucketInputAndBucketToInput(t *testing.T) {
-	b := parseBucketInput("Done, Closed, Resolved")
+func TestSplitCommas(t *testing.T) {
+	got := splitCommas(" PROJ , , OPS,")
+	want := []string{"PROJ", "OPS"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("splitCommas = %v, want %v", got, want)
+	}
+	if splitCommas(" , , ") != nil && len(splitCommas(" , , ")) != 0 {
+		t.Errorf("expected empty slice for whitespace-only input")
+	}
+}
+
+func TestToBucket(t *testing.T) {
+	b := toBucket("Done", []string{"Done", "Closed", "Resolved"})
 	if b.Default != "Done" {
 		t.Errorf("default = %q", b.Default)
 	}
@@ -32,22 +43,35 @@ func TestParseBucketInputAndBucketToInput(t *testing.T) {
 		t.Errorf("aliases = %v", b.Aliases)
 	}
 
-	// Empty / blanks
-	b = parseBucketInput(" , , ")
-	if b.Default != "" || len(b.Aliases) != 0 {
-		t.Errorf("blanks: %+v", b)
+	// Default absent from list still wins; list entries not equal to it
+	// become aliases.
+	b = toBucket("Done", []string{"Closed"})
+	if b.Default != "Done" || len(b.Aliases) != 1 || b.Aliases[0] != "Closed" {
+		t.Errorf("toBucket fallback = %+v", b)
+	}
+}
+
+func TestSeedBucket(t *testing.T) {
+	existing := config.StatusBucket{Default: "A", Aliases: []string{"B"}}
+	list, def := seedBucket(existing, nil, "")
+	if def != "A" || len(list) != 2 || list[0] != "A" || list[1] != "B" {
+		t.Errorf("existing seed wrong: list=%v def=%q", list, def)
 	}
 
-	// Round-trip
-	rendered := bucketToInput(b, "fallback")
-	if rendered != "fallback" {
-		t.Errorf("fallback = %q", rendered)
+	// no existing + no category → empty
+	list, def = seedBucket(config.StatusBucket{}, nil, "")
+	if len(list) != 0 || def != "" {
+		t.Errorf("empty seed wrong: list=%v def=%q", list, def)
 	}
+}
 
-	full := config.StatusBucket{Default: "A", Aliases: []string{"B", "C"}}
-	rendered = bucketToInput(full, "X")
-	if rendered != "A, B, C" {
-		t.Errorf("rendered = %q", rendered)
+func TestRunSetupWithoutToken(t *testing.T) {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	t.Setenv(config.JiraTokenEnv, "")
+	err := runSetup(true)
+	if err == nil || !strings.Contains(err.Error(), config.JiraTokenEnv) {
+		t.Errorf("expected token-required error, got %v", err)
 	}
 }
 
@@ -81,9 +105,9 @@ func TestReadAndWritePid(t *testing.T) {
 func TestRunSetupEditFormFails(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
-	// edit=true forces past the "already configured" early return.
-	// Without a TTY the huh form errors at Run(); we just need to cover
-	// the form-construction statements.
+	t.Setenv(config.JiraTokenEnv, "tok")
+	// edit=true + token set forces past the early returns; without a TTY
+	// the huh form errors at Run(), which is what we're exercising.
 	_ = runSetup(true)
 }
 
@@ -96,6 +120,7 @@ func writeValidConfig(t *testing.T) {
 			ArchitectJiraID: "arch",
 			DeveloperJiraID: "dev",
 			RepoURLField:    "customfield_repo",
+			ProjectKeys:     []string{"PROJ"},
 			TaskStatusMap: config.TaskStatusMap{
 				New:               config.StatusBucket{Default: "To Do"},
 				Planning:          config.StatusBucket{Default: "Planning"},
