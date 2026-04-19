@@ -21,12 +21,12 @@ func GetPlan(ctx context.Context, parentKey string) (*data.Plan, error) {
 	var statusStr string
 	err := p.QueryRow(ctx, `
 		SELECT parent_jira_key, name, repo_url, active_wave_idx,
-		       status, last_error, last_error_stage, failed_at,
+		       status, jira_status, last_error, last_error_stage, failed_at,
 		       completed_at, created_at, updated_at
 		FROM plans WHERE parent_jira_key = $1
 	`, parentKey).Scan(
 		&plan.ParentJiraKey, &plan.Name, &plan.RepoURL, &plan.ActiveWaveIdx,
-		&statusStr, &plan.LastError, &plan.LastErrorStage, &plan.FailedAt,
+		&statusStr, &plan.JiraStatus, &plan.LastError, &plan.LastErrorStage, &plan.FailedAt,
 		&plan.CompletedAt, &plan.CreatedAt, &plan.UpdatedAt,
 	)
 	if err != nil {
@@ -63,7 +63,7 @@ func SavePlan(ctx context.Context, plan *data.Plan) error {
 	}
 	plan.UpdatedAt = time.Now().UTC()
 	if plan.Status == "" {
-		plan.Status = data.PlanActive
+		plan.Status = data.PlanCoding
 	}
 
 	tx, err := p.Begin(ctx)
@@ -74,21 +74,22 @@ func SavePlan(ctx context.Context, plan *data.Plan) error {
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO plans (parent_jira_key, name, repo_url, active_wave_idx,
-		                   status, last_error, last_error_stage, failed_at,
+		                   status, jira_status, last_error, last_error_stage, failed_at,
 		                   completed_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (parent_jira_key) DO UPDATE SET
 			name = EXCLUDED.name,
 			repo_url = EXCLUDED.repo_url,
 			active_wave_idx = EXCLUDED.active_wave_idx,
 			status = EXCLUDED.status,
+			jira_status = EXCLUDED.jira_status,
 			last_error = EXCLUDED.last_error,
 			last_error_stage = EXCLUDED.last_error_stage,
 			failed_at = EXCLUDED.failed_at,
 			completed_at = EXCLUDED.completed_at,
 			updated_at = EXCLUDED.updated_at
 	`, plan.ParentJiraKey, plan.Name, plan.RepoURL, plan.ActiveWaveIdx,
-		string(plan.Status), plan.LastError, plan.LastErrorStage, plan.FailedAt,
+		string(plan.Status), plan.JiraStatus, plan.LastError, plan.LastErrorStage, plan.FailedAt,
 		plan.CompletedAt, plan.CreatedAt, plan.UpdatedAt); err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func SavePlan(ctx context.Context, plan *data.Plan) error {
 }
 
 // MarkPlanDone flips status to done; rows stay for history.
-func MarkPlanDone(ctx context.Context, parentKey string) error {
+func MarkPlanDone(ctx context.Context, parentKey, jiraStatus string) error {
 	p := Shared()
 	if p == nil {
 		return ErrNotStarted
@@ -149,13 +150,13 @@ func MarkPlanDone(ctx context.Context, parentKey string) error {
 	now := time.Now().UTC()
 	_, err := p.Exec(ctx, `
 		UPDATE plans
-		SET status = $2, completed_at = $3, updated_at = $3
+		SET status = $2, jira_status = $3, completed_at = $4, updated_at = $4
 		WHERE parent_jira_key = $1
-	`, parentKey, string(data.PlanDone), now)
+	`, parentKey, string(data.PlanDone), jiraStatus, now)
 	return err
 }
 
-func MarkPlanFailed(ctx context.Context, parentKey, stage, errMsg string) error {
+func MarkPlanFailed(ctx context.Context, parentKey, jiraStatus, stage, errMsg string) error {
 	p := Shared()
 	if p == nil {
 		return ErrNotStarted
@@ -163,14 +164,14 @@ func MarkPlanFailed(ctx context.Context, parentKey, stage, errMsg string) error 
 	now := time.Now().UTC()
 	_, err := p.Exec(ctx, `
 		UPDATE plans
-		SET status = $2, last_error = $3, last_error_stage = $4,
-		    failed_at = $5, updated_at = $5
+		SET status = $2, jira_status = $3, last_error = $4, last_error_stage = $5,
+		    failed_at = $6, updated_at = $6
 		WHERE parent_jira_key = $1
-	`, parentKey, string(data.PlanPlanningFailed), errMsg, stage, now)
+	`, parentKey, string(data.PlanPlanningFailed), jiraStatus, errMsg, stage, now)
 	return err
 }
 
-func MarkPlanDismissed(ctx context.Context, parentKey string) error {
+func MarkPlanDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 	p := Shared()
 	if p == nil {
 		return ErrNotStarted
@@ -178,9 +179,9 @@ func MarkPlanDismissed(ctx context.Context, parentKey string) error {
 	now := time.Now().UTC()
 	_, err := p.Exec(ctx, `
 		UPDATE plans
-		SET status = $2, updated_at = $3
+		SET status = $2, jira_status = $3, updated_at = $4
 		WHERE parent_jira_key = $1
-	`, parentKey, string(data.PlanDismissed), now)
+	`, parentKey, string(data.PlanDone), jiraStatus, now)
 	return err
 }
 

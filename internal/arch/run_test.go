@@ -75,7 +75,7 @@ func TestRunCloneFailureRecordsFailure(t *testing.T) {
 	}
 	// Mark it failed first so retry-guard wipes children and re-runs plan() →
 	// clone fails → recordFailure called.
-	if err := db.MarkPlanFailed(ctx, "ARCH-RUN-FAIL", "x", "y"); err != nil {
+	if err := db.MarkPlanFailed(ctx, "ARCH-RUN-FAIL", "Planning Failed", "x", "y"); err != nil {
 		t.Fatal(err)
 	}
 	Run(ctx, "ARCH-RUN-FAIL", "/nonexistent/repo.git", "t", "do thing")
@@ -98,7 +98,7 @@ func TestRunRetryGuardTerminalIgnored(t *testing.T) {
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MarkPlanDone(ctx, "ARCH-RUN-DONE"); err != nil {
+	if err := db.MarkPlanDone(ctx, "ARCH-RUN-DONE", "Done"); err != nil {
 		t.Fatal(err)
 	}
 	// Plan is terminal; Run should observe and skip without failing.
@@ -118,7 +118,7 @@ func TestRunFullPlanSucceeds(t *testing.T) {
 	if got == nil {
 		t.Fatal("plan not saved")
 	}
-	if got.Status != data.PlanActive {
+	if got.Status != data.PlanCoding {
 		t.Errorf("status = %q", got.Status)
 	}
 	if len(got.TaskList) != 2 || len(got.Waves) != 2 {

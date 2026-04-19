@@ -34,17 +34,15 @@ const cfgJSON = `{
       "new": {"default": "To Do"},
       "planning": {"default": "Planning"},
       "planning_failed": {"default": "Planning Failed"},
-      "subtask_in_progress": {"default": "In Progress"},
-      "done": {"default": "Done"},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "In Progress"},
+      "done": {"default": "Done", "aliases": ["Dismissed"]}
     },
     "subtask_status_map": {
       "new": {"default": "To Do"},
-      "in_progress": {"default": "In Progress"},
-      "pr_open": {"default": "In Review"},
-      "code_failed": {"default": "Dev Failed"},
-      "done": {"default": "Done"},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "Dev In Progress"},
+      "coding_failed": {"default": "Dev Failed"},
+      "in_review": {"default": "In Review"},
+      "done": {"default": "Done", "aliases": ["Dismissed"]}
     }
   }
 }`
@@ -63,7 +61,7 @@ func fakeJiraHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(201)
 		_, _ = w.Write([]byte(`{"id":"1"}`))
 	case strings.HasSuffix(r.URL.Path, "/transitions") && r.Method == http.MethodGet:
-		_, _ = w.Write([]byte(`{"transitions":[{"id":"11","to":{"name":"Done"}},{"id":"12","to":{"name":"Dismissed"}},{"id":"13","to":{"name":"Dev Failed"}},{"id":"14","to":{"name":"In Review"}},{"id":"15","to":{"name":"In Progress"}}]}`))
+		_, _ = w.Write([]byte(`{"transitions":[{"id":"11","to":{"name":"Done"}},{"id":"12","to":{"name":"Dismissed"}},{"id":"13","to":{"name":"Dev Failed"}},{"id":"14","to":{"name":"In Review"}},{"id":"15","to":{"name":"Dev In Progress"}}]}`))
 	case strings.HasSuffix(r.URL.Path, "/transitions") && r.Method == http.MethodPost:
 		var body struct {
 			Transition struct{ ID string } `json:"transition"`

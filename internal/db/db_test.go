@@ -140,12 +140,12 @@ func TestMarkPlanDone(t *testing.T) {
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkPlanDone(ctx, "PROJ-D"); err != nil {
+	if err := MarkPlanDone(ctx, "PROJ-D", "Done"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := GetPlan(ctx, "PROJ-D")
-	if got.Status != data.PlanDone {
-		t.Errorf("status = %q", got.Status)
+	if got.Status != data.PlanDone || got.JiraStatus != "Done" {
+		t.Errorf("status = %q jira = %q", got.Status, got.JiraStatus)
 	}
 }
 
@@ -162,19 +162,19 @@ func TestMarkPlanFailedAndDismissed(t *testing.T) {
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkPlanFailed(ctx, "PROJ-F", "stage", "boom"); err != nil {
+	if err := MarkPlanFailed(ctx, "PROJ-F", "Planning Failed", "stage", "boom"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := GetPlan(ctx, "PROJ-F")
-	if got.Status != data.PlanPlanningFailed || got.LastError != "boom" || got.LastErrorStage != "stage" {
+	if got.Status != data.PlanPlanningFailed || got.LastError != "boom" || got.LastErrorStage != "stage" || got.JiraStatus != "Planning Failed" {
 		t.Errorf("got = %+v", got)
 	}
-	if err := MarkPlanDismissed(ctx, "PROJ-F"); err != nil {
+	if err := MarkPlanDismissed(ctx, "PROJ-F", "Dismissed"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = GetPlan(ctx, "PROJ-F")
-	if got.Status != data.PlanDismissed {
-		t.Errorf("status = %q", got.Status)
+	if got.Status != data.PlanDone || got.JiraStatus != "Dismissed" {
+		t.Errorf("status = %q jira = %q", got.Status, got.JiraStatus)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestSaveCodeTaskAndGet(t *testing.T) {
 		Title:         "do",
 		Description:   "do thing",
 		Branch:        "PROJ-2",
-		Status:        data.CodeInProgress,
+		Status:        data.CodeCoding,
 	}
 	if err := SaveCodeTask(ctx, task); err != nil {
 		t.Fatalf("SaveCodeTask: %v", err)
@@ -225,7 +225,7 @@ func TestSaveCodeTaskAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCodeTask: %v", err)
 	}
-	if got == nil || got.Title != "do" || got.Status != data.CodeInProgress {
+	if got == nil || got.Title != "do" || got.Status != data.CodeCoding {
 		t.Errorf("got = %+v", got)
 	}
 }
@@ -244,11 +244,11 @@ func TestGetCodeTaskMissing(t *testing.T) {
 func TestMarkCodeFailed(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	if err := MarkCodeFailed(ctx, "PROJ-NEW", "PROJ-1", "https://r", "title", "PROJ-NEW", "stage", "err"); err != nil {
+	if err := MarkCodeFailed(ctx, "PROJ-NEW", "PROJ-1", "https://r", "title", "PROJ-NEW", "Dev Failed", "stage", "err"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := GetCodeTask(ctx, "PROJ-NEW")
-	if got == nil || got.Status != data.CodeFailed || got.Error != "err" || got.LastErrorStage != "stage" {
+	if got == nil || got.Status != data.CodeCodingFailed || got.Error != "err" || got.LastErrorStage != "stage" || got.JiraStatus != "Dev Failed" {
 		t.Errorf("got = %+v", got)
 	}
 }
@@ -256,15 +256,15 @@ func TestMarkCodeFailed(t *testing.T) {
 func TestMarkCodeFailedExisting(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	task := &data.CodeTask{IssueKey: "PROJ-EX", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-EX", Status: data.CodeInProgress}
+	task := &data.CodeTask{IssueKey: "PROJ-EX", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-EX", Status: data.CodeCoding}
 	if err := SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkCodeFailed(ctx, "PROJ-EX", "PROJ-1", "r", "x", "PROJ-EX", "stage", "boom"); err != nil {
+	if err := MarkCodeFailed(ctx, "PROJ-EX", "PROJ-1", "r", "x", "PROJ-EX", "Dev Failed", "stage", "boom"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := GetCodeTask(ctx, "PROJ-EX")
-	if got.Status != data.CodeFailed {
+	if got.Status != data.CodeCodingFailed {
 		t.Errorf("status = %q", got.Status)
 	}
 }
@@ -272,19 +272,19 @@ func TestMarkCodeFailedExisting(t *testing.T) {
 func TestMarkCodeDismissed(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	task := &data.CodeTask{IssueKey: "PROJ-DM", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-DM", Status: data.CodeInProgress}
+	task := &data.CodeTask{IssueKey: "PROJ-DM", ParentJiraKey: "PROJ-1", RepoURL: "r", Title: "x", Branch: "PROJ-DM", Status: data.CodeCoding}
 	if err := SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkCodeDismissed(ctx, "PROJ-DM"); err != nil {
+	if err := MarkCodeDismissed(ctx, "PROJ-DM", "Dismissed"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := GetCodeTask(ctx, "PROJ-DM")
-	if got.Status != data.CodeDismissed {
-		t.Errorf("status = %q", got.Status)
+	if got.Status != data.CodeDone || got.JiraStatus != "Dismissed" {
+		t.Errorf("status = %q jira = %q", got.Status, got.JiraStatus)
 	}
 	// Dismissing a missing task is a no-op
-	if err := MarkCodeDismissed(ctx, "MISSING-1"); err != nil {
+	if err := MarkCodeDismissed(ctx, "MISSING-1", "Dismissed"); err != nil {
 		t.Errorf("missing dismiss: %v", err)
 	}
 }
@@ -358,13 +358,13 @@ func TestNotStartedReturnsErr(t *testing.T) {
 	if _, err := GetPlan(ctx, "X"); err != ErrNotStarted {
 		t.Errorf("GetPlan: %v", err)
 	}
-	if err := MarkPlanDone(ctx, "X"); err != ErrNotStarted {
+	if err := MarkPlanDone(ctx, "X", "Done"); err != ErrNotStarted {
 		t.Errorf("MarkPlanDone: %v", err)
 	}
-	if err := MarkPlanFailed(ctx, "X", "s", "e"); err != ErrNotStarted {
+	if err := MarkPlanFailed(ctx, "X", "Planning Failed", "s", "e"); err != ErrNotStarted {
 		t.Errorf("MarkPlanFailed: %v", err)
 	}
-	if err := MarkPlanDismissed(ctx, "X"); err != ErrNotStarted {
+	if err := MarkPlanDismissed(ctx, "X", "Dismissed"); err != ErrNotStarted {
 		t.Errorf("MarkPlanDismissed: %v", err)
 	}
 	if err := WipePlanChildren(ctx, "X"); err != ErrNotStarted {
@@ -382,10 +382,10 @@ func TestNotStartedReturnsErr(t *testing.T) {
 	if _, err := GetCodeTask(ctx, "X"); err != ErrNotStarted {
 		t.Errorf("GetCodeTask: %v", err)
 	}
-	if err := MarkCodeFailed(ctx, "X", "Y", "r", "t", "X", "s", "e"); err != ErrNotStarted {
+	if err := MarkCodeFailed(ctx, "X", "Y", "r", "t", "X", "Dev Failed", "s", "e"); err != ErrNotStarted {
 		t.Errorf("MarkCodeFailed: %v", err)
 	}
-	if err := MarkCodeDismissed(ctx, "X"); err != ErrNotStarted {
+	if err := MarkCodeDismissed(ctx, "X", "Dismissed"); err != ErrNotStarted {
 		t.Errorf("MarkCodeDismissed: %v", err)
 	}
 }

@@ -44,13 +44,14 @@ func formatFailureComment(role, stage, msg string) string {
 func recordFailure(ctx context.Context, parentKey, stage string, err error) {
 	msg := redactAndTruncate(err.Error())
 	slog.Error("arch: stage failed", "key", parentKey, "stage", stage, "err", err)
+	failedName := status.TaskJiraName(status.PlanningFailed)
 	if client := jira.Shared(); client != nil {
 		_ = client.CommentIssue(parentKey, formatFailureComment("arch", stage, msg))
-		if name := status.TaskJiraName(status.PlanningFailed); name != "" {
-			_ = client.Transition(parentKey, name)
+		if failedName != "" {
+			_ = client.Transition(parentKey, failedName)
 		}
 	}
-	if err := db.MarkPlanFailed(ctx, parentKey, stage, msg); err != nil {
+	if err := db.MarkPlanFailed(ctx, parentKey, failedName, stage, msg); err != nil {
 		slog.Warn("arch: mark plan failed (db)", "key", parentKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(parentKey))

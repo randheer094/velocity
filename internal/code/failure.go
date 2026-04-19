@@ -44,13 +44,14 @@ func formatFailureComment(role, stage, msg string) string {
 func recordFailure(ctx context.Context, issueKey, parentKey, repoURL, title, stage string, err error) {
 	msg := redactAndTruncate(err.Error())
 	slog.Error("code: stage failed", "key", issueKey, "stage", stage, "err", err)
+	failedName := status.SubtaskJiraName(status.CodingFailed)
 	if client := jira.Shared(); client != nil {
 		_ = client.CommentIssue(issueKey, formatFailureComment("code", stage, msg))
-		if name := status.SubtaskJiraName(status.CodeFailed); name != "" {
-			_ = client.Transition(issueKey, name)
+		if failedName != "" {
+			_ = client.Transition(issueKey, failedName)
 		}
 	}
-	if err := db.MarkCodeFailed(ctx, issueKey, parentKey, repoURL, title, issueKey, stage, msg); err != nil {
+	if err := db.MarkCodeFailed(ctx, issueKey, parentKey, repoURL, title, issueKey, failedName, stage, msg); err != nil {
 		slog.Warn("code: mark failed (db)", "key", issueKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(issueKey))

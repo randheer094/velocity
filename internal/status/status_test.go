@@ -23,17 +23,15 @@ func writeConfig(t *testing.T) {
       "new": {"default": "To Do"},
       "planning": {"default": "Planning"},
       "planning_failed": {"default": "Planning Failed"},
-      "subtask_in_progress": {"default": "In Progress"},
-      "done": {"default": "Done", "aliases": ["Closed"]},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "In Progress"},
+      "done": {"default": "Done", "aliases": ["Closed", "Dismissed"]}
     },
     "subtask_status_map": {
       "new": {"default": "To Do"},
-      "in_progress": {"default": "In Progress"},
-      "pr_open": {"default": "In Review"},
-      "code_failed": {"default": "Dev Failed"},
-      "done": {"default": "Done"},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "Dev In Progress"},
+      "coding_failed": {"default": "Dev Failed"},
+      "in_review": {"default": "In Review"},
+      "done": {"default": "Done", "aliases": ["Dismissed"]}
     }
   }
 }`
@@ -54,13 +52,12 @@ func resetConfig(t *testing.T) {
 func TestTaskJiraName(t *testing.T) {
 	writeConfig(t)
 	cases := map[Canonical]string{
-		New:               "To Do",
-		Planning:          "Planning",
-		PlanningFailed:    "Planning Failed",
-		SubtaskInProgress: "In Progress",
-		Done:              "Done",
-		Dismissed:         "Dismissed",
-		PROpen:            "",
+		New:            "To Do",
+		Planning:       "Planning",
+		PlanningFailed: "Planning Failed",
+		Coding:         "In Progress",
+		Done:           "Done",
+		InReview:       "",
 	}
 	for c, want := range cases {
 		if got := TaskJiraName(c); got != want {
@@ -72,13 +69,12 @@ func TestTaskJiraName(t *testing.T) {
 func TestSubtaskJiraName(t *testing.T) {
 	writeConfig(t)
 	cases := map[Canonical]string{
-		New:        "To Do",
-		InProgress: "In Progress",
-		PROpen:     "In Review",
-		CodeFailed: "Dev Failed",
-		Done:       "Done",
-		Dismissed:  "Dismissed",
-		Planning:   "",
+		New:          "To Do",
+		Coding:       "Dev In Progress",
+		InReview:     "In Review",
+		CodingFailed: "Dev Failed",
+		Done:         "Done",
+		Planning:     "",
 	}
 	for c, want := range cases {
 		if got := SubtaskJiraName(c); got != want {
@@ -93,10 +89,10 @@ func TestTaskCanonical(t *testing.T) {
 		"To Do":           New,
 		"Planning":        Planning,
 		"Planning Failed": PlanningFailed,
-		"In Progress":     SubtaskInProgress,
+		"In Progress":     Coding,
 		"Done":            Done,
 		"Closed":          Done,
-		"Dismissed":       Dismissed,
+		"Dismissed":       Done,
 		"unknown":         "",
 	}
 	for in, want := range cases {
@@ -109,18 +105,37 @@ func TestTaskCanonical(t *testing.T) {
 func TestSubtaskCanonical(t *testing.T) {
 	writeConfig(t)
 	cases := map[string]Canonical{
-		"To Do":       New,
-		"In Progress": InProgress,
-		"In Review":   PROpen,
-		"Dev Failed":  CodeFailed,
-		"Done":        Done,
-		"Dismissed":   Dismissed,
-		"unknown":     "",
+		"To Do":           New,
+		"Dev In Progress": Coding,
+		"In Review":       InReview,
+		"Dev Failed":      CodingFailed,
+		"Done":            Done,
+		"Dismissed":       Done,
+		"unknown":         "",
 	}
 	for in, want := range cases {
 		if got := SubtaskCanonical(in); got != want {
 			t.Errorf("SubtaskCanonical(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestDismissAliasHelpers(t *testing.T) {
+	writeConfig(t)
+	if !IsTaskDismissAlias("Dismissed") {
+		t.Error("IsTaskDismissAlias(Dismissed) = false, want true")
+	}
+	if IsTaskDismissAlias("Done") {
+		t.Error("IsTaskDismissAlias(Done) = true, want false (default, not alias)")
+	}
+	if !IsSubtaskDismissAlias("Dismissed") {
+		t.Error("IsSubtaskDismissAlias(Dismissed) = false, want true")
+	}
+	if IsSubtaskDismissAlias("Done") {
+		t.Error("IsSubtaskDismissAlias(Done) = true, want false")
+	}
+	if got := SubtaskDismissJiraName(); got != "Dismissed" {
+		t.Errorf("SubtaskDismissJiraName = %q, want %q", got, "Dismissed")
 	}
 }
 

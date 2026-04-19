@@ -84,10 +84,10 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	existing, _ := db.GetPlan(ctx, parentKey)
 	if existing != nil {
 		switch existing.Status {
-		case data.PlanDone, data.PlanDismissed:
+		case data.PlanDone:
 			slog.Info("arch: plan terminal, ignoring re-assignment", "key", parentKey, "status", existing.Status)
 			return nil
-		case data.PlanActive:
+		case data.PlanCoding:
 			if existing.ActiveWaveIdx < len(existing.Waves) {
 				slog.Info("arch: plan active, advancing instead of re-planning", "key", parentKey)
 				return AdvanceWave(ctx, parentKey)
@@ -142,7 +142,8 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		TaskList:      parsed.TaskList,
 		Waves:         parsed.Waves,
 		ActiveWaveIdx: 0,
-		Status:        data.PlanActive,
+		Status:        data.PlanCoding,
+		JiraStatus:    status.TaskJiraName(status.Coding),
 		CreatedAt:     time.Now().UTC(),
 	}
 
@@ -182,9 +183,9 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		return fmt.Errorf("save plan: %w", err)
 	}
 
-	*stage = "transition-subtask-in-progress"
-	if sip := status.TaskJiraName(status.SubtaskInProgress); sip != "" {
-		client.Transition(parentKey, sip)
+	*stage = "transition-coding"
+	if coding := status.TaskJiraName(status.Coding); coding != "" {
+		client.Transition(parentKey, coding)
 	}
 
 	*stage = "assign-wave-0"
@@ -265,7 +266,7 @@ func archiveDone(ctx context.Context, client *jira.Client, p *data.Plan) error {
 			return fmt.Errorf("failed to transition parent %s to %s", p.ParentJiraKey, done)
 		}
 	}
-	if err := db.MarkPlanDone(ctx, p.ParentJiraKey); err != nil {
+	if err := db.MarkPlanDone(ctx, p.ParentJiraKey, done); err != nil {
 		slog.Warn("arch: failed to mark plan done", "key", p.ParentJiraKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(p.ParentJiraKey))
@@ -289,17 +290,15 @@ func keysOf(w data.Wave) []string {
 }
 
 // Dismissed counts as terminal for wave math — a dismissed sub-task
-// unblocks successors the same way a merged one does.
+// unblocks successors the same way a merged one does. "Dismissed" is
+// an alias of the Done bucket, so a single canonical check suffices.
 func allDone(issues map[string]status.IssueInfo, keys []string) bool {
 	for _, k := range keys {
 		info, ok := issues[k]
 		if !ok {
 			return false
 		}
-		switch status.SubtaskCanonical(info.Status) {
-		case status.Done, status.Dismissed:
-			continue
-		default:
+		if status.SubtaskCanonical(info.Status) != status.Done {
 			return false
 		}
 	}

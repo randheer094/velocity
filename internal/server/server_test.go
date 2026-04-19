@@ -24,17 +24,15 @@ const cfgTmpl = `{
       "new": {"default": "To Do"},
       "planning": {"default": "Planning"},
       "planning_failed": {"default": "Planning Failed"},
-      "subtask_in_progress": {"default": "In Progress"},
-      "done": {"default": "Done"},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "In Progress"},
+      "done": {"default": "Done", "aliases": ["Dismissed"]}
     },
     "subtask_status_map": {
       "new": {"default": "To Do"},
-      "in_progress": {"default": "In Progress"},
-      "pr_open": {"default": "In Review"},
-      "code_failed": {"default": "Dev Failed"},
-      "done": {"default": "Done"},
-      "dismissed": {"default": "Dismissed"}
+      "coding": {"default": "Dev In Progress"},
+      "coding_failed": {"default": "Dev Failed"},
+      "in_review": {"default": "In Review"},
+      "done": {"default": "Done", "aliases": ["Dismissed"]}
     }
   },
   "server": {"host": "127.0.0.1", "port": %d, "max_concurrency": 1, "queue_size": 4}

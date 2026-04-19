@@ -19,12 +19,12 @@ func GetCodeTask(ctx context.Context, issueKey string) (*data.CodeTask, error) {
 	var statusStr string
 	err := p.QueryRow(ctx, `
 		SELECT issue_key, parent_jira_key, repo_url, title, description,
-		       branch, pr_url, status, error, last_error_stage, failed_at,
+		       branch, pr_url, status, jira_status, error, last_error_stage, failed_at,
 		       created_at, updated_at
 		FROM code_tasks WHERE issue_key = $1
 	`, issueKey).Scan(
 		&t.IssueKey, &t.ParentJiraKey, &t.RepoURL, &t.Title, &t.Description,
-		&t.Branch, &t.PRURL, &statusStr, &t.Error, &t.LastErrorStage, &t.FailedAt,
+		&t.Branch, &t.PRURL, &statusStr, &t.JiraStatus, &t.Error, &t.LastErrorStage, &t.FailedAt,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
@@ -49,9 +49,9 @@ func SaveCodeTask(ctx context.Context, t *data.CodeTask) error {
 	_, err := p.Exec(ctx, `
 		INSERT INTO code_tasks (
 			issue_key, parent_jira_key, repo_url, title, description,
-			branch, pr_url, status, error, last_error_stage, failed_at,
+			branch, pr_url, status, jira_status, error, last_error_stage, failed_at,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (issue_key) DO UPDATE SET
 			parent_jira_key = EXCLUDED.parent_jira_key,
 			repo_url = EXCLUDED.repo_url,
@@ -60,20 +60,21 @@ func SaveCodeTask(ctx context.Context, t *data.CodeTask) error {
 			branch = EXCLUDED.branch,
 			pr_url = EXCLUDED.pr_url,
 			status = EXCLUDED.status,
+			jira_status = EXCLUDED.jira_status,
 			error = EXCLUDED.error,
 			last_error_stage = EXCLUDED.last_error_stage,
 			failed_at = EXCLUDED.failed_at,
 			updated_at = EXCLUDED.updated_at
 	`,
 		t.IssueKey, t.ParentJiraKey, t.RepoURL, t.Title, t.Description,
-		t.Branch, t.PRURL, string(t.Status), t.Error, t.LastErrorStage, t.FailedAt,
+		t.Branch, t.PRURL, string(t.Status), t.JiraStatus, t.Error, t.LastErrorStage, t.FailedAt,
 		t.CreatedAt, t.UpdatedAt,
 	)
 	return err
 }
 
 // MarkCodeFailed upserts a minimal row if the task is absent.
-func MarkCodeFailed(ctx context.Context, issueKey, parentKey, repoURL, title, branch, stage, errMsg string) error {
+func MarkCodeFailed(ctx context.Context, issueKey, parentKey, repoURL, title, branch, jiraStatus, stage, errMsg string) error {
 	t, _ := GetCodeTask(ctx, issueKey)
 	now := time.Now().UTC()
 	if t == nil {
@@ -85,14 +86,15 @@ func MarkCodeFailed(ctx context.Context, issueKey, parentKey, repoURL, title, br
 			Branch:        branch,
 		}
 	}
-	t.Status = data.CodeFailed
+	t.Status = data.CodeCodingFailed
+	t.JiraStatus = jiraStatus
 	t.Error = errMsg
 	t.LastErrorStage = stage
 	t.FailedAt = &now
 	return SaveCodeTask(ctx, t)
 }
 
-func MarkCodeDismissed(ctx context.Context, issueKey string) error {
+func MarkCodeDismissed(ctx context.Context, issueKey, jiraStatus string) error {
 	t, err := GetCodeTask(ctx, issueKey)
 	if err != nil {
 		return err
@@ -100,6 +102,7 @@ func MarkCodeDismissed(ctx context.Context, issueKey string) error {
 	if t == nil {
 		return nil
 	}
-	t.Status = data.CodeDismissed
+	t.Status = data.CodeDone
+	t.JiraStatus = jiraStatus
 	return SaveCodeTask(ctx, t)
 }

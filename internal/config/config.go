@@ -54,23 +54,47 @@ func (b StatusBucket) Matches(name string) bool {
 	return false
 }
 
+// MatchesAlias reports whether name matches one of the bucket's aliases
+// (ignoring Default). Used to distinguish dismissal transitions from
+// regular Done within the same done bucket.
+func (b StatusBucket) MatchesAlias(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	for _, a := range b.Aliases {
+		if strings.ToLower(a) == n {
+			return true
+		}
+	}
+	return false
+}
+
+// FirstAlias returns the first non-empty alias, or "" if none.
+func (b StatusBucket) FirstAlias() string {
+	for _, a := range b.Aliases {
+		if a != "" {
+			return a
+		}
+	}
+	return ""
+}
+
 type TaskStatusMap struct {
-	New               StatusBucket `yaml:"new"`
-	Planning          StatusBucket `yaml:"planning"`
-	PlanningFailed    StatusBucket `yaml:"planning_failed"`
-	SubtaskInProgress StatusBucket `yaml:"subtask_in_progress"`
-	Done              StatusBucket `yaml:"done"`
-	Dismissed         StatusBucket `yaml:"dismissed"`
+	New            StatusBucket `yaml:"new"`
+	Planning       StatusBucket `yaml:"planning"`
+	PlanningFailed StatusBucket `yaml:"planning_failed"`
+	Coding         StatusBucket `yaml:"coding"`
+	Done           StatusBucket `yaml:"done"`
 }
 
 func (s TaskStatusMap) validate() error {
 	for name, b := range map[string]StatusBucket{
-		"new":                 s.New,
-		"planning":            s.Planning,
-		"planning_failed":     s.PlanningFailed,
-		"subtask_in_progress": s.SubtaskInProgress,
-		"done":                s.Done,
-		"dismissed":           s.Dismissed,
+		"new":             s.New,
+		"planning":        s.Planning,
+		"planning_failed": s.PlanningFailed,
+		"coding":          s.Coding,
+		"done":            s.Done,
 	} {
 		if b.Default == "" {
 			return fmt.Errorf("task_status_map.%s.default is required", name)
@@ -80,22 +104,20 @@ func (s TaskStatusMap) validate() error {
 }
 
 type SubtaskStatusMap struct {
-	New        StatusBucket `yaml:"new"`
-	InProgress StatusBucket `yaml:"in_progress"`
-	PROpen     StatusBucket `yaml:"pr_open"`
-	CodeFailed StatusBucket `yaml:"code_failed"`
-	Done       StatusBucket `yaml:"done"`
-	Dismissed  StatusBucket `yaml:"dismissed"`
+	New          StatusBucket `yaml:"new"`
+	Coding       StatusBucket `yaml:"coding"`
+	CodingFailed StatusBucket `yaml:"coding_failed"`
+	InReview     StatusBucket `yaml:"in_review"`
+	Done         StatusBucket `yaml:"done"`
 }
 
 func (s SubtaskStatusMap) validate() error {
 	for name, b := range map[string]StatusBucket{
-		"new":         s.New,
-		"in_progress": s.InProgress,
-		"pr_open":     s.PROpen,
-		"code_failed": s.CodeFailed,
-		"done":        s.Done,
-		"dismissed":   s.Dismissed,
+		"new":           s.New,
+		"coding":        s.Coding,
+		"coding_failed": s.CodingFailed,
+		"in_review":     s.InReview,
+		"done":          s.Done,
 	} {
 		if b.Default == "" {
 			return fmt.Errorf("subtask_status_map.%s.default is required", name)
@@ -153,23 +175,21 @@ func (j JiraConfig) Validate() error {
 
 func taskBucketMap(m TaskStatusMap) map[string]StatusBucket {
 	return map[string]StatusBucket{
-		"new":                 m.New,
-		"planning":            m.Planning,
-		"planning_failed":     m.PlanningFailed,
-		"subtask_in_progress": m.SubtaskInProgress,
-		"done":                m.Done,
-		"dismissed":           m.Dismissed,
+		"new":             m.New,
+		"planning":        m.Planning,
+		"planning_failed": m.PlanningFailed,
+		"coding":          m.Coding,
+		"done":            m.Done,
 	}
 }
 
 func subtaskBucketMap(m SubtaskStatusMap) map[string]StatusBucket {
 	return map[string]StatusBucket{
-		"new":         m.New,
-		"in_progress": m.InProgress,
-		"pr_open":     m.PROpen,
-		"code_failed": m.CodeFailed,
-		"done":        m.Done,
-		"dismissed":   m.Dismissed,
+		"new":           m.New,
+		"coding":        m.Coding,
+		"coding_failed": m.CodingFailed,
+		"in_review":     m.InReview,
+		"done":          m.Done,
 	}
 }
 

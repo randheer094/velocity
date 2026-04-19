@@ -15,20 +15,18 @@ func validJira() JiraConfig {
 		DeveloperJiraID: "dev-id",
 		RepoURLField:    "customfield_10050",
 		TaskStatusMap: TaskStatusMap{
-			New:               StatusBucket{Default: "To Do"},
-			Planning:          StatusBucket{Default: "Planning"},
-			PlanningFailed:    StatusBucket{Default: "Planning Failed"},
-			SubtaskInProgress: StatusBucket{Default: "In Progress"},
-			Done:              StatusBucket{Default: "Done"},
-			Dismissed:         StatusBucket{Default: "Dismissed"},
+			New:            StatusBucket{Default: "To Do"},
+			Planning:       StatusBucket{Default: "Planning"},
+			PlanningFailed: StatusBucket{Default: "Planning Failed"},
+			Coding:         StatusBucket{Default: "In Progress"},
+			Done:           StatusBucket{Default: "Done", Aliases: []string{"Dismissed"}},
 		},
 		SubtaskStatusMap: SubtaskStatusMap{
-			New:        StatusBucket{Default: "To Do"},
-			InProgress: StatusBucket{Default: "In Progress"},
-			PROpen:     StatusBucket{Default: "In Review"},
-			CodeFailed: StatusBucket{Default: "Dev Failed"},
-			Done:       StatusBucket{Default: "Done"},
-			Dismissed:  StatusBucket{Default: "Dismissed"},
+			New:          StatusBucket{Default: "To Do"},
+			Coding:       StatusBucket{Default: "Dev In Progress"},
+			CodingFailed: StatusBucket{Default: "Dev Failed"},
+			InReview:     StatusBucket{Default: "In Review"},
+			Done:         StatusBucket{Default: "Done", Aliases: []string{"Dismissed"}},
 		},
 	}
 }
@@ -53,7 +51,7 @@ func TestJiraConfigValidate(t *testing.T) {
 			j.TaskStatusMap.PlanningFailed = StatusBucket{Default: "Same"}
 		},
 		"subtask overlap via alias": func(j *JiraConfig) {
-			j.SubtaskStatusMap.PROpen = StatusBucket{Default: "In Review", Aliases: []string{"In Progress"}}
+			j.SubtaskStatusMap.InReview = StatusBucket{Default: "In Review", Aliases: []string{"Dev In Progress"}}
 		},
 	}
 	for name, mut := range cases {
@@ -141,7 +139,7 @@ func TestSaveAndReload(t *testing.T) {
 
 func TestCrossWorkflowOverlapIsAllowed(t *testing.T) {
 	j := validJira()
-	// "In Progress" appears in task SubtaskInProgress and subtask InProgress.
+	// "Dismissed" appears as an alias in both task and subtask done buckets.
 	// That's explicitly allowed — different workflows, different meanings.
 	if err := j.Validate(); err != nil {
 		t.Fatalf("cross-workflow overlap should validate: %v", err)

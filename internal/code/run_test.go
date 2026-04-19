@@ -22,7 +22,7 @@ func TestRunBadRepoFails(t *testing.T) {
 	// Invalid repo URL → ParseRepoURL fails → recordFailure called.
 	Run(context.Background(), "CODE-RUN-FAIL", "P-1", "not-a-url", "t", "d")
 	got, _ := db.GetCodeTask(context.Background(), "CODE-RUN-FAIL")
-	if got == nil || got.Status != data.CodeFailed {
+	if got == nil || got.Status != data.CodeCodingFailed {
 		t.Errorf("got = %+v", got)
 	}
 }
@@ -51,13 +51,13 @@ func TestRunRetryGuardTerminalIgnored(t *testing.T) {
 func TestRunRetryGuardFailedRetries(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	if err := db.MarkCodeFailed(ctx, "CODE-RUN-RETRY", "P-1", "not-a-url", "x", "CODE-RUN-RETRY", "stage", "boom"); err != nil {
+	if err := db.MarkCodeFailed(ctx, "CODE-RUN-RETRY", "P-1", "not-a-url", "x", "CODE-RUN-RETRY", "Dev Failed", "stage", "boom"); err != nil {
 		t.Fatal(err)
 	}
 	// Re-running picks the failed task and tries to retry → ParseRepoURL fails again.
 	Run(ctx, "CODE-RUN-RETRY", "P-1", "not-a-url", "x", "d")
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-RETRY")
-	if got.Status != data.CodeFailed {
+	if got.Status != data.CodeCodingFailed {
 		t.Errorf("expected failed: %+v", got)
 	}
 }
@@ -78,8 +78,8 @@ func TestRunFullCodeSucceeds(t *testing.T) {
 	if got == nil {
 		t.Fatal("task not saved")
 	}
-	if got.Status != data.CodePROpen {
-		t.Errorf("status = %q, want %q (err=%q stage=%q)", got.Status, data.CodePROpen, got.Error, got.LastErrorStage)
+	if got.Status != data.CodeInReview {
+		t.Errorf("status = %q, want %q (err=%q stage=%q)", got.Status, data.CodeInReview, got.Error, got.LastErrorStage)
 	}
 	if got.PRURL == "" {
 		t.Error("PRURL empty")
@@ -99,7 +99,7 @@ func TestRunNoChangesFails(t *testing.T) {
 	Run(ctx, "CODE-RUN-NOOP", "P-1", remote, "title", "desc")
 
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-NOOP")
-	if got == nil || got.Status != data.CodeFailed {
+	if got == nil || got.Status != data.CodeCodingFailed {
 		t.Errorf("expected failed: %+v", got)
 	}
 	if got != nil && got.LastErrorStage != "commit" {
@@ -116,14 +116,14 @@ func TestRunRetryGuardPROpenIgnored(t *testing.T) {
 		RepoURL:       "r",
 		Title:         "x",
 		Branch:        "CODE-RUN-PROPEN",
-		Status:        data.CodePROpen,
+		Status:        data.CodeInReview,
 	}
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	Run(ctx, "CODE-RUN-PROPEN", "P-1", "r", "x", "d")
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-PROPEN")
-	if got.Status != data.CodePROpen {
+	if got.Status != data.CodeInReview {
 		t.Errorf("status changed: %q", got.Status)
 	}
 }
@@ -138,13 +138,13 @@ func TestRunFullCodeForcePush(t *testing.T) {
 
 	ctx := context.Background()
 	// Pre-mark failed so the retry guard sets forcePush=true.
-	if err := db.MarkCodeFailed(ctx, "CODE-RUN-FORCE", "P-1", remote, "x", "CODE-RUN-FORCE", "stage", "boom"); err != nil {
+	if err := db.MarkCodeFailed(ctx, "CODE-RUN-FORCE", "P-1", remote, "x", "CODE-RUN-FORCE", "Dev Failed", "stage", "boom"); err != nil {
 		t.Fatal(err)
 	}
 	Run(ctx, "CODE-RUN-FORCE", "P-1", remote, "implement", "desc")
 
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-FORCE")
-	if got == nil || got.Status != data.CodePROpen {
+	if got == nil || got.Status != data.CodeInReview {
 		t.Errorf("got = %+v", got)
 	}
 }

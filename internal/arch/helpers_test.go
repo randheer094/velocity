@@ -88,27 +88,19 @@ func TestKeysOf(t *testing.T) {
 
 func TestAllDone(t *testing.T) {
 	keys := []string{"A-1", "A-2"}
-	statusName := func(c status.Canonical) string {
-		switch c {
-		case status.Done:
-			return "Done"
-		case status.Dismissed:
-			return "Dismissed"
-		}
-		return "Other"
-	}
 	cfg := setupConfig(t)
 	defer cfg()
 
+	// Dismissed is a Done-bucket alias, so both map to canonical Done.
 	good := map[string]status.IssueInfo{
-		"A-1": {Status: statusName(status.Done)},
-		"A-2": {Status: statusName(status.Dismissed)},
+		"A-1": {Status: "Done"},
+		"A-2": {Status: "Dismissed"},
 	}
 	if !allDone(good, keys) {
 		t.Error("expected allDone true")
 	}
 	bad := map[string]status.IssueInfo{
-		"A-1": {Status: "In Progress"},
+		"A-1": {Status: "Dev In Progress"},
 		"A-2": {Status: "Done"},
 	}
 	if allDone(bad, keys) {

@@ -14,7 +14,8 @@ import (
 
 // OnDismissed cascades DISMISSED to every still-open sub-task.
 // Best-effort: per-step failures are logged but do not abort.
-func OnDismissed(ctx context.Context, parentKey string) error {
+// jiraStatus is the parent's Jira status name from the dismiss webhook.
+func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 	cancelIfRunning(parentKey)
 
 	p, err := db.GetPlan(ctx, parentKey)
@@ -25,13 +26,13 @@ func OnDismissed(ctx context.Context, parentKey string) error {
 		slog.Info("arch: dismiss for parent without plan, nothing to cascade", "key", parentKey)
 		return nil
 	}
-	if p.Status == data.PlanDismissed || p.Status == data.PlanDone {
+	if p.Status == data.PlanDone {
 		slog.Info("arch: plan already terminal, ignoring dismiss", "key", parentKey, "status", p.Status)
 		return nil
 	}
 
 	client := jira.Shared()
-	dismissedName := status.SubtaskJiraName(status.Dismissed)
+	dismissedName := status.SubtaskDismissJiraName()
 	if client != nil && dismissedName != "" {
 		subKeys := make([]string, 0, len(p.TaskList))
 		for _, t := range p.TaskList {
@@ -46,7 +47,7 @@ func OnDismissed(ctx context.Context, parentKey string) error {
 				continue
 			}
 			switch status.SubtaskCanonical(info.Status) {
-			case status.Done, status.Dismissed, status.CodeFailed:
+			case status.Done, status.CodingFailed:
 				continue
 			}
 			if !client.Transition(key, dismissedName) {
@@ -55,7 +56,7 @@ func OnDismissed(ctx context.Context, parentKey string) error {
 		}
 	}
 
-	if err := db.MarkPlanDismissed(ctx, parentKey); err != nil {
+	if err := db.MarkPlanDismissed(ctx, parentKey, jiraStatus); err != nil {
 		slog.Warn("arch: mark plan dismissed", "key", parentKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(parentKey))

@@ -89,10 +89,10 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	forcePush := false
 	if existing, _ := db.GetCodeTask(ctx, issueKey); existing != nil {
 		switch existing.Status {
-		case data.CodeDone, data.CodeDismissed, data.CodePROpen:
+		case data.CodeDone, data.CodeInReview:
 			slog.Info("code: task already terminal or in review, ignoring re-assignment", "key", issueKey, "status", existing.Status)
 			return nil
-		case data.CodeFailed:
+		case data.CodeCodingFailed:
 			slog.Info("code: retrying prior failed task with force-with-lease", "key", issueKey)
 			forcePush = true
 		}
@@ -106,16 +106,17 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 		Title:         title,
 		Description:   description,
 		Branch:        issueKey,
-		Status:        data.CodeInProgress,
+		Status:        data.CodeCoding,
+		JiraStatus:    status.SubtaskJiraName(status.Coding),
 		CreatedAt:     time.Now().UTC(),
 	}
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		return fmt.Errorf("save code task: %w", err)
 	}
 
-	*stage = "transition-in-progress"
-	if inProgress := status.SubtaskJiraName(status.InProgress); inProgress != "" {
-		jiraClient.Transition(issueKey, inProgress)
+	*stage = "transition-coding"
+	if coding := status.SubtaskJiraName(status.Coding); coding != "" {
+		jiraClient.Transition(issueKey, coding)
 	}
 
 	*stage = "parse-repo-url"
@@ -191,7 +192,8 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "save-task-post-pr"
 	task.PRURL = prURL
-	task.Status = data.CodePROpen
+	task.Status = data.CodeInReview
+	task.JiraStatus = status.SubtaskJiraName(status.InReview)
 	task.Error = ""
 	task.LastErrorStage = ""
 	task.FailedAt = nil
@@ -199,9 +201,9 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 		return fmt.Errorf("save code task (post-pr): %w", err)
 	}
 
-	*stage = "transition-pr-open"
-	if prOpen := status.SubtaskJiraName(status.PROpen); prOpen != "" {
-		jiraClient.Transition(issueKey, prOpen)
+	*stage = "transition-in-review"
+	if task.JiraStatus != "" {
+		jiraClient.Transition(issueKey, task.JiraStatus)
 	}
 
 	slog.Info("code: PR open", "key", issueKey, "url", prURL)
@@ -224,6 +226,7 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 	task, _ := db.GetCodeTask(ctx, issueKey)
 	if task != nil {
 		task.Status = data.CodeDone
+		task.JiraStatus = done
 		if prURL != "" {
 			task.PRURL = prURL
 		}
@@ -236,10 +239,11 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 
 // OnDismissed cancels any in-flight run and marks the sub-task
 // dismissed. The caller must enqueue arch.AdvanceWave so the parent
-// advances past it.
-func OnDismissed(ctx context.Context, issueKey string) error {
+// advances past it. jiraStatus is the sub-task's Jira status name
+// from the dismiss webhook.
+func OnDismissed(ctx context.Context, issueKey, jiraStatus string) error {
 	cancelIfRunning(issueKey)
-	if err := db.MarkCodeDismissed(ctx, issueKey); err != nil {
+	if err := db.MarkCodeDismissed(ctx, issueKey, jiraStatus); err != nil {
 		slog.Warn("code: mark dismissed", "key", issueKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(issueKey))

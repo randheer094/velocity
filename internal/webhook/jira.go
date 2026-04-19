@@ -161,26 +161,15 @@ func handleUpdated(key string, fields map[string]any) {
 	}
 
 	if isSubtask {
-		switch status.SubtaskCanonical(st) {
-		case status.Done:
-			if parentKey == "" {
-				return
-			}
-			slog.Info("jira webhook: subtask DONE, advancing parent", "key", key, "parent", parentKey)
-			Enqueue(Job{
-				Name: "arch.AdvanceWave:" + parentKey,
-				Fn: func(ctx context.Context) {
-					if err := arch.AdvanceWave(ctx, parentKey); err != nil {
-						slog.Error("arch: advance failed", "parent", parentKey, "err", err)
-					}
-				},
-			})
-		case status.Dismissed:
+		if status.SubtaskCanonical(st) != status.Done {
+			return
+		}
+		if status.IsSubtaskDismissAlias(st) {
 			slog.Info("jira webhook: subtask DISMISSED", "key", key, "parent", parentKey)
 			Enqueue(Job{
 				Name: "code.OnDismissed:" + key,
 				Fn: func(ctx context.Context) {
-					if err := code.OnDismissed(ctx, key); err != nil {
+					if err := code.OnDismissed(ctx, key, st); err != nil {
 						slog.Error("code: dismiss failed", "key", key, "err", err)
 					}
 					if parentKey != "" {
@@ -190,16 +179,29 @@ func handleUpdated(key string, fields map[string]any) {
 					}
 				},
 			})
+			return
 		}
+		if parentKey == "" {
+			return
+		}
+		slog.Info("jira webhook: subtask DONE, advancing parent", "key", key, "parent", parentKey)
+		Enqueue(Job{
+			Name: "arch.AdvanceWave:" + parentKey,
+			Fn: func(ctx context.Context) {
+				if err := arch.AdvanceWave(ctx, parentKey); err != nil {
+					slog.Error("arch: advance failed", "parent", parentKey, "err", err)
+				}
+			},
+		})
 		return
 	}
 
-	if status.TaskCanonical(st) == status.Dismissed {
+	if status.IsTaskDismissAlias(st) {
 		slog.Info("jira webhook: parent DISMISSED", "key", key)
 		Enqueue(Job{
 			Name: "arch.OnDismissed:" + key,
 			Fn: func(ctx context.Context) {
-				if err := arch.OnDismissed(ctx, key); err != nil {
+				if err := arch.OnDismissed(ctx, key, st); err != nil {
 					slog.Error("arch: dismiss failed", "key", key, "err", err)
 				}
 			},

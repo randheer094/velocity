@@ -33,27 +33,29 @@ type WaveRef struct {
 type PlanStatus string
 
 const (
-	PlanActive         PlanStatus = "active"
-	PlanDone           PlanStatus = "done"
+	PlanNew            PlanStatus = "new"
+	PlanPlanning       PlanStatus = "planning"
 	PlanPlanningFailed PlanStatus = "planning_failed"
-	PlanDismissed      PlanStatus = "dismissed"
+	PlanCoding         PlanStatus = "coding"
+	PlanDone           PlanStatus = "done"
 )
 
 // Plan is arch's full output, persisted per parent issue.
 type Plan struct {
-	ParentJiraKey   string        `json:"parent_jira_key"`
-	Name            string        `json:"name"`
-	RepoURL         string        `json:"repo_url"`
-	TaskList        []PlannedTask `json:"task_list"`
-	Waves           []Wave        `json:"waves"`
-	ActiveWaveIdx   int           `json:"active_wave_idx"`
-	Status          PlanStatus    `json:"status"`
-	LastError       string        `json:"last_error,omitempty"`
-	LastErrorStage  string        `json:"last_error_stage,omitempty"`
-	FailedAt        *time.Time    `json:"failed_at,omitempty"`
-	CompletedAt     *time.Time    `json:"completed_at,omitempty"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	ParentJiraKey  string        `json:"parent_jira_key"`
+	Name           string        `json:"name"`
+	RepoURL        string        `json:"repo_url"`
+	TaskList       []PlannedTask `json:"task_list"`
+	Waves          []Wave        `json:"waves"`
+	ActiveWaveIdx  int           `json:"active_wave_idx"`
+	Status         PlanStatus    `json:"status"`
+	JiraStatus     string        `json:"jira_status,omitempty"`
+	LastError      string        `json:"last_error,omitempty"`
+	LastErrorStage string        `json:"last_error_stage,omitempty"`
+	FailedAt       *time.Time    `json:"failed_at,omitempty"`
+	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 func (p Plan) Validate() error {
@@ -74,11 +76,11 @@ func (p Plan) Validate() error {
 type CodeStatus string
 
 const (
-	CodeInProgress CodeStatus = "in_progress"
-	CodePROpen     CodeStatus = "pr_open"
-	CodeDone       CodeStatus = "done"
-	CodeFailed     CodeStatus = "code_failed"
-	CodeDismissed  CodeStatus = "dismissed"
+	CodeNew          CodeStatus = "new"
+	CodeCoding       CodeStatus = "coding"
+	CodeCodingFailed CodeStatus = "coding_failed"
+	CodeInReview     CodeStatus = "in_review"
+	CodeDone         CodeStatus = "done"
 )
 
 // CodeTask is the persisted record for a sub-task's coding run.
@@ -91,6 +93,7 @@ type CodeTask struct {
 	Branch         string     `json:"branch,omitempty"`
 	PRURL          string     `json:"pr_url,omitempty"`
 	Status         CodeStatus `json:"status"`
+	JiraStatus     string     `json:"jira_status,omitempty"`
 	Error          string     `json:"error,omitempty"`
 	LastErrorStage string     `json:"last_error_stage,omitempty"`
 	FailedAt       *time.Time `json:"failed_at,omitempty"`

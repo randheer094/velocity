@@ -10,7 +10,7 @@ import (
 
 func TestOnDismissedNoTask(t *testing.T) {
 	requireDB(t)
-	if err := OnDismissed(context.Background(), "CODE-NOPE"); err != nil {
+	if err := OnDismissed(context.Background(), "CODE-NOPE", "Dismissed"); err != nil {
 		t.Errorf("OnDismissed: %v", err)
 	}
 }
@@ -24,17 +24,17 @@ func TestOnDismissedExisting(t *testing.T) {
 		RepoURL:       "r",
 		Title:         "x",
 		Branch:        "CODE-DM",
-		Status:        data.CodeInProgress,
+		Status:        data.CodeCoding,
 	}
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if err := OnDismissed(ctx, "CODE-DM"); err != nil {
+	if err := OnDismissed(ctx, "CODE-DM", "Dismissed"); err != nil {
 		t.Fatalf("OnDismissed: %v", err)
 	}
 	got, _ := db.GetCodeTask(ctx, "CODE-DM")
-	if got.Status != data.CodeDismissed {
-		t.Errorf("status = %q", got.Status)
+	if got.Status != data.CodeDone || got.JiraStatus != "Dismissed" {
+		t.Errorf("status = %q jira = %q", got.Status, got.JiraStatus)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestMarkMergedFull(t *testing.T) {
 		RepoURL:       "r",
 		Title:         "x",
 		Branch:        "CODE-M",
-		Status:        data.CodePROpen,
+		Status:        data.CodeInReview,
 	}
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		t.Fatal(err)
