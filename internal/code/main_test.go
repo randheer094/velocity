@@ -61,6 +61,13 @@ func fakeJiraHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(201)
 		_, _ = w.Write([]byte(`{"id":"1"}`))
 	case strings.HasSuffix(r.URL.Path, "/transitions") && r.Method == http.MethodGet:
+		// For "FAIL-TRANS-*" issues, return an empty list so Transition() returns false.
+		key := strings.TrimPrefix(r.URL.Path, "/rest/api/3/issue/")
+		key = strings.TrimSuffix(key, "/transitions")
+		if strings.HasPrefix(key, "FAIL-TRANS-") {
+			_, _ = w.Write([]byte(`{"transitions":[]}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"transitions":[{"id":"11","to":{"name":"Done"}},{"id":"12","to":{"name":"Dismissed"}},{"id":"13","to":{"name":"Dev Failed"}},{"id":"14","to":{"name":"In Review"}},{"id":"15","to":{"name":"Dev In Progress"}}]}`))
 	case strings.HasSuffix(r.URL.Path, "/transitions") && r.Method == http.MethodPost:
 		var body struct {
@@ -84,9 +91,13 @@ func fakeGithubHandler(w http.ResponseWriter, r *http.Request) {
 		// FindOpenPR list query: return empty array (no existing PR).
 		_, _ = w.Write([]byte(`[]`))
 	case strings.HasSuffix(r.URL.Path, "/pulls") && r.Method == http.MethodPost:
-		// CreatePR: count and respond.
+		// CreatePR: count and respond. For "fail/pr" repo return 500 so URL is empty.
 		path := strings.TrimPrefix(r.URL.Path, "/repos/")
 		repo := strings.TrimSuffix(path, "/pulls")
+		if repo == "fail/pr" {
+			w.WriteHeader(500)
+			return
+		}
 		n, _ := createdPRs.LoadOrStore(repo, 0)
 		createdPRs.Store(repo, n.(int)+1)
 		_, _ = fmt.Fprintf(w, `{"html_url":"https://github.com/%s/pull/1","number":1}`, repo)

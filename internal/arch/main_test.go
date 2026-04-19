@@ -99,6 +99,24 @@ func TestMain(m *testing.M) {
 	script := `#!/bin/sh
 last=""
 for a in "$@"; do last="$a"; done
+case "${ARCH_TEST_MODE:-}" in
+  fail)
+    echo "synthetic claude failure" >&2
+    exit 1
+    ;;
+  bad-json)
+    echo "<<<PLAN_BEGIN>>>this is not json<<<PLAN_END>>>"
+    exit 0
+    ;;
+  empty-tasks)
+    echo '<<<PLAN_BEGIN>>>{"task_list":[],"waves":[{"tasks":[{"id":"t"}]}]}<<<PLAN_END>>>'
+    exit 0
+    ;;
+  empty-waves)
+    echo '<<<PLAN_BEGIN>>>{"task_list":[{"id":"t","title":"x"}],"waves":[]}<<<PLAN_END>>>'
+    exit 0
+    ;;
+esac
 case "$last" in
   *PLAN_BEGIN*)
     cat <<EOF

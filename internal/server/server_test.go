@@ -57,6 +57,81 @@ func TestRunMissingConfig(t *testing.T) {
 	}
 }
 
+// TestRunEnsureRuntimeDirsFails covers the EnsureRuntimeDirs error branch.
+// SetDir derives DataDir = AgentDir/data; placing a regular file at that
+// path makes MkdirAll fail with ENOTDIR.
+func TestRunEnsureRuntimeDirsFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := fmt.Sprintf(cfgTmpl, freePort(t))
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "data"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.SetDir(dir)
+	if err := Run(); err == nil || !contains(err.Error(), "ensure runtime dirs") {
+		t.Errorf("expected ensure runtime dirs error, got %v", err)
+	}
+}
+
+// TestRunDBStartFails covers the db.Start error branch: valid config,
+// runtime dirs OK, but DB env points at an unreachable target.
+func TestRunDBStartFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := fmt.Sprintf(cfgTmpl, freePort(t))
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.SetDir(dir)
+	t.Setenv(config.DBHostEnv, "")
+	if err := Run(); err == nil || !contains(err.Error(), "start db") {
+		t.Errorf("expected start db error, got %v", err)
+	}
+}
+
+// TestRunListenErrorReturned covers the errCh-receive branch when
+// ListenAndServe fails (port already bound).
+func TestRunListenErrorReturned(t *testing.T) {
+	if os.Getenv(config.DBHostEnv) == "" || os.Getenv(config.DBPasswordEnv) == "" {
+		t.Skipf("set %s and %s to run", config.DBHostEnv, config.DBPasswordEnv)
+	}
+	// Hold a port so the server's ListenAndServe sees EADDRINUSE.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	dir := t.TempDir()
+	cfg := fmt.Sprintf(cfgTmpl, port)
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.SetDir(dir)
+
+	done := make(chan error, 1)
+	go func() { done <- Run() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected listen error")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run did not return after listen failure")
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRunStartsAndShutdown(t *testing.T) {
 	if os.Getenv(config.DBHostEnv) == "" || os.Getenv(config.DBPasswordEnv) == "" {
 		t.Skipf("set %s and %s to run", config.DBHostEnv, config.DBPasswordEnv)

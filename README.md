@@ -221,19 +221,17 @@ jira:
   developer_jira_id: 712020:...
   repo_url_field: customfield_10050
   task_status_map:
-    new:                 {default: To Do,            aliases: [Backlog]}
-    planning:            {default: Planning}
-    planning_failed:     {default: Planning Failed}
-    subtask_in_progress: {default: In Progress}
-    done:                {default: Done}
-    dismissed:           {default: Dismissed}
+    new:             {default: New}
+    planning:        {default: Planning}
+    planning_failed: {default: Planning Failed}
+    coding:          {default: Subtask In progress}
+    done:            {default: Done, aliases: [Dismissed]}
   subtask_status_map:
-    new:         {default: To Do}
-    in_progress: {default: In Progress, aliases: [Doing]}
-    pr_open:     {default: In Review}
-    code_failed: {default: Dev Failed}
-    done:        {default: Done,        aliases: [Closed]}
-    dismissed:   {default: Dismissed}
+    new:           {default: Ready for Dev}
+    coding:        {default: Dev In Progress}
+    coding_failed: {default: Dev Failed}
+    in_review:     {default: In Review}
+    done:          {default: Done, aliases: [Dismissed]}
 
 llm:
   arch:
@@ -256,8 +254,19 @@ Each canonical bucket maps to one **default** Jira workflow status
 plus optional **aliases**. The default is the status velocity
 transitions *into*; aliases resolve *into* the bucket on reads
 (case-insensitive). One bucket can absorb multiple real-world
-Jira statuses (e.g. `In Progress` and `Doing` both count as
-`in_progress`).
+Jira statuses.
+
+Canonical buckets:
+
+- **Parent**: `new`, `planning`, `planning_failed`, `coding`, `done`.
+- **Sub-task**: `new`, `coding`, `coding_failed`, `in_review`, `done`.
+
+The conventional pattern is to add `Dismissed` as an alias of
+`done`. Cascade detection (a parent dismissal cascades to sub-tasks)
+keys off the alias name; the raw Jira name is preserved on each
+row's `jira_status` column so dismissed and merged are
+distinguishable in the DB even though both collapse to canonical
+`done`.
 
 ### Server tuning
 

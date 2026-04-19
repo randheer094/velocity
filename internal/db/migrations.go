@@ -95,7 +95,11 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, m migration) error 
 }
 
 func loadMigrations() ([]migration, error) {
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	return loadMigrationsFrom(migrationsFS, "migrations")
+}
+
+func loadMigrationsFrom(fsys fs.FS, dir string) ([]migration, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
@@ -120,7 +124,7 @@ func loadMigrations() ([]migration, error) {
 			return nil, fmt.Errorf("migration version %d used by both %s and %s", v, prev, name)
 		}
 		seen[v] = name
-		body, err := fs.ReadFile(migrationsFS, "migrations/"+name)
+		body, err := fs.ReadFile(fsys, dir+"/"+name)
 		if err != nil {
 			return nil, err
 		}
