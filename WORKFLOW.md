@@ -143,6 +143,11 @@ Retry is triggered by re-assignment, not by a new command.
 Branch name is always the sub-task key. Retries update the same
 branch; they never open a second PR.
 
+A daemon crash mid-job is recovered automatically on restart: the
+row that was marked `running` is reset to `pending` and the agent
+entry re-runs under its existing guard, so either the work
+completes or the ticket lands in its failed state.
+
 ## Dismissal
 
 Dismissal is terminal. It cancels any in-flight run via the per-
@@ -188,27 +193,39 @@ comment.
 The HTTP handlers do zero work. Each webhook:
 
 ```
-handler ──► webhook.Enqueue(Job{Name, Fn})
+handler ──► webhook.Enqueue(kind, name, payload)
                │
                ▼
-          in-memory FIFO queue (bounded by server.queue_size)
+          INSERT INTO webhook_jobs (status='pending')
                │
                ▼
-          N workers (server.max_concurrency, default 1 = serial)
+          N pollers (server.max_concurrency, default 1 = serial)
+          claim via SELECT … FOR UPDATE SKIP LOCKED
                │
                ▼
-        arch.Run / code.Run / arch.AdvanceWave / code.MarkMerged
+        dispatch(kind) → arch.Run / code.Run /
+                         arch.AdvanceWave / code.MarkMerged /
+                         code.Iterate / arch.OnDismissed / …
 ```
 
 - Handlers return `202` immediately.
-- With `max_concurrency = 1`, jobs are strictly serial in arrival
-  order.
-- With `N > 1`, dequeue order is still FIFO; up to N jobs run in
-  parallel.
-- Full queue → job dropped and logged (backpressure).
+- Enqueue is a single row insert with a JSON payload — no closures,
+  no shared in-memory state. Jobs survive daemon restart.
+- With `max_concurrency = 1`, pollers claim FIFO (oldest `id` first)
+  and run serially.
+- With `N > 1`, each worker claims its own row via `FOR UPDATE SKIP
+  LOCKED`; up to N jobs run in parallel.
+- `server.queue_size` is a **soft cap** on pending rows. When the
+  backlog exceeds it, Enqueue logs + drops so handlers never block.
 - Stale enqueues are safe: each agent entry re-reads the DB row and
-  no-ops if the ticket is already terminal or in a compatible
-  phase.
+  no-ops if the ticket is already terminal or in a compatible phase.
+- On daemon start, any row stuck in `running` (the previous process
+  died mid-job) is reset to `pending` so it runs again. A detached
+  context marks each row `done`/`failed` even if the shutdown ctx
+  has fired.
+- Completed rows stay in `webhook_jobs` as history:
+  `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;` gives a
+  live view of the queue.
 
 ## Call-chain summary
 

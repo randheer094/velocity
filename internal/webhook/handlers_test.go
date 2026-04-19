@@ -2,13 +2,11 @@ package webhook
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -65,73 +63,19 @@ func teardownConfig(t *testing.T) {
 	config.SetDir(t.TempDir())
 }
 
-// drainEnqueued runs queued jobs synchronously by replacing the queue.
-// Tests that don't care about job execution can ignore this.
-func startCapturingQueue(t *testing.T) *capturedQueue {
-	return startCapturingQueueOpts(t, false)
-}
+// startCapturingQueue stubs the DB-backed Enqueue so tests can assert
+// against recorded inserts without needing Postgres. Returns the
+// recorder whose Names() matches the pre-DB helper's API.
+func startCapturingQueue(t *testing.T) *fakeInsert { return installCapture(t) }
 
-// startRunningQueue: like startCapturingQueue but also calls each job's Fn.
-// Lets tests cover closure bodies built by webhook handlers.
-func startRunningQueue(t *testing.T) *capturedQueue {
-	return startCapturingQueueOpts(t, true)
-}
-
-func startCapturingQueueOpts(t *testing.T, run bool) *capturedQueue {
-	t.Helper()
-	cap := &capturedQueue{}
-	resetQueue()
-	queueMu.Lock()
-	queue = make(chan Job, 32)
-	queueCap = 32
-	rootCtx = context.Background()
-	q := queue
-	queueMu.Unlock()
-
-	cap.q = q
-	go func() {
-		for j := range q {
-			if run && j.Fn != nil {
-				func() {
-					defer func() { _ = recover() }()
-					j.Fn(context.Background())
-				}()
-			}
-			cap.mu.Lock()
-			cap.jobs = append(cap.jobs, j.Name)
-			cap.mu.Unlock()
-		}
-	}()
-	t.Cleanup(func() {
-		resetQueue()
-	})
-	return cap
-}
-
-type capturedQueue struct {
-	mu   sync.Mutex
-	jobs []string
-	q    chan Job
-}
-
-func (c *capturedQueue) Names() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]string, len(c.jobs))
-	copy(out, c.jobs)
-	return out
-}
+// startRunningQueue is the "also exercise closures" variant: every
+// recorded insert is dispatched through a stubbed dispatcher so we
+// keep coverage for the payload round-trip.
+func startRunningQueue(t *testing.T) *fakeInsert { return installRunning(t) }
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for condition")
+	waitForCond(t, 2*time.Second, cond)
 }
 
 func TestJiraHandlerWrongMethod(t *testing.T) {

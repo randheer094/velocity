@@ -113,6 +113,7 @@ func TestRunFullPlanSucceeds(t *testing.T) {
 	requireDB(t)
 	remote := setupBareRemote(t)
 	ctx := context.Background()
+	cleanPlan(t, "PROJ-FULL")
 	Run(ctx, "PROJ-FULL", remote, "title", "do the thing")
 	got, _ := db.GetPlan(ctx, "PROJ-FULL")
 	if got == nil {

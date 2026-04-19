@@ -214,7 +214,7 @@ server:
   host: 0.0.0.0
   port: 8000
   max_concurrency: 1       # workers draining the FIFO queue (default 1 = strict serial)
-  queue_size: 1024         # enqueue buffer; overflow is dropped + logged
+  queue_size: 1024         # soft cap on pending webhook_jobs rows; overflow is dropped + logged
 
 jira:
   base_url: https://acme.atlassian.net
@@ -277,8 +277,15 @@ distinguishable in the DB even though both collapse to canonical
 - `max_concurrency = N` (>1) → up to N agent runs in parallel;
   dequeue order is still FIFO. Raise this if your Claude and Jira
   plans can tolerate concurrent clones + pushes.
-- `queue_size` bounds the in-memory queue; overflow drops the job
-  and logs an error. Webhook senders receive `202` regardless.
+- `queue_size` is a **soft cap** on pending rows in the
+  `webhook_jobs` table. Enqueue checks the pending count first; if
+  the backlog is larger than `queue_size`, the job is dropped and
+  logged. Webhook senders receive `202` regardless.
+- The queue is Postgres-backed: enqueue inserts a row; workers claim
+  via `SELECT … FOR UPDATE SKIP LOCKED`. Jobs survive daemon
+  restart — any row stuck in `running` when the daemon died is
+  reset to `pending` on next start. For a live view of the queue:
+  `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;`.
 
 ### LLM per-role settings
 
@@ -487,7 +494,7 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 | GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |
 | Sub-task PR never opens | `code: stage failed`; usually a `git push` auth failure or a Claude timeout. Bump `llm.code.timeout_sec`. |
-| Queue drops under load | Raise `server.queue_size`, or `server.max_concurrency`, or both. |
+| Queue drops under load | `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;` — if pending is near `server.queue_size`, raise the cap or `server.max_concurrency` (or both). |
 | Schema change not picked up | Add a new `internal/db/migrations/NNNN_*.sql` and restart; migrations are forward-only. |
 
 Full errors always land in `~/.velocity/daemon.log`. Jira comments

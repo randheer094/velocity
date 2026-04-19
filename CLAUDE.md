@@ -18,7 +18,7 @@ in [WORKFLOW.md](./WORKFLOW.md). Don't duplicate them here.
 4. **Jira issue keys are IDs.** DB rows, workspaces, git branches, PR titles all key off the issue key directly. Sub-task branch ≡ sub-task key.
 5. **External Postgres; workspaces ephemeral.** Every DB connection field (`VELOCITY_DB_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_NAME`) comes from env; `sslmode` is hardcoded `disable`. Clones under `~/.velocity/workspace/<KEY>/`. Schema evolves via forward-only numbered migrations in `internal/db/migrations/` — never edit a shipped migration.
 6. **Config is YAML; secrets are env vars.** One `config.yaml` (operator-written; see `config.example.yaml`) for Jira, LLM, and server tuning. Everything else (API tokens, webhook secrets, all Postgres fields) is env. No setup command, no runtime config reload.
-7. **FIFO dispatch with parallel cap.** Handlers enqueue and return 202; workers drain the queue.
+7. **DB-backed FIFO dispatch with parallel cap.** Handlers insert a row into `webhook_jobs` and return 202; workers claim via `FOR UPDATE SKIP LOCKED` and dispatch by `kind`. Jobs survive daemon restart.
 8. **Failures are first-class states.** `planning_failed`, `coding_failed` (operator-facing "Dev Failed") are real DB statuses. `Dismissed` collapses to canonical `done` via the configured alias; the raw Jira name lives in `jira_status`. Retry = re-assign; dismiss is terminal.
 
 ## Editing this index

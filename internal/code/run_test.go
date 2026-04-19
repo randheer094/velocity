@@ -72,6 +72,7 @@ func TestRunFullCodeSucceeds(t *testing.T) {
 	defer func() { parseRepoURL = prev }()
 
 	ctx := context.Background()
+	cleanCodeTask(t, "CODE-RUN-OK")
 	Run(ctx, "CODE-RUN-OK", "P-1", remote, "implement feature", "do the thing")
 
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-OK")
@@ -96,6 +97,7 @@ func TestRunNoChangesFails(t *testing.T) {
 
 	t.Setenv("CODE_TEST_NO_WRITE", "1")
 	ctx := context.Background()
+	cleanCodeTask(t, "CODE-RUN-NOOP")
 	Run(ctx, "CODE-RUN-NOOP", "P-1", remote, "title", "desc")
 
 	got, _ := db.GetCodeTask(ctx, "CODE-RUN-NOOP")

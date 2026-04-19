@@ -81,14 +81,9 @@ func handlePullRequest(w http.ResponseWriter, body []byte) {
 	}
 
 	slog.Info("github webhook: PR merged", "branch", branch, "url", payload.PullRequest.HTMLURL)
-	prURL := payload.PullRequest.HTMLURL
-	Enqueue(Job{
-		Name: "code.MarkMerged:" + branch,
-		Fn: func(ctx context.Context) {
-			if err := code.MarkMerged(ctx, branch, prURL); err != nil {
-				slog.Error("code: mark merged failed", "key", branch, "err", err)
-			}
-		},
+	Enqueue(KindCodeMarkMerged, "code.MarkMerged:"+branch, codeMarkMergedPayload{
+		Branch: branch,
+		PRURL:  payload.PullRequest.HTMLURL,
 	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
 }
@@ -140,11 +135,11 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 	summary := fetchWorkflowFailureSummary(payload.Repository.FullName, payload.WorkflowRun.ID)
 	reason := buildWorkflowRunInstruction(payload.WorkflowRun.Name, payload.WorkflowRun.HTMLURL, summary)
 	hint := deriveCICommitHint(payload.WorkflowRun.Name, summary)
-	Enqueue(Job{
-		Name: "code.Iterate:ci:" + branch,
-		Fn: func(ctx context.Context) {
-			code.Iterate(ctx, branch, code.IterateCI, reason, hint)
-		},
+	Enqueue(KindCodeIterate, "code.Iterate:ci:"+branch, codeIteratePayload{
+		Branch: branch,
+		Reason: code.IterateCI,
+		Extra:  reason,
+		Hint:   hint,
 	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
 }
@@ -268,11 +263,11 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 	slog.Info("github webhook: /velocity command", "branch", branch, "instruction", instruction)
 	extra := "User command posted on the open PR: " + instruction
 	hint := truncateHint(instruction, 60)
-	Enqueue(Job{
-		Name: "code.Iterate:cmd:" + branch,
-		Fn: func(ctx context.Context) {
-			code.Iterate(ctx, branch, code.IterateCommand, extra, hint)
-		},
+	Enqueue(KindCodeIterate, "code.Iterate:cmd:"+branch, codeIteratePayload{
+		Branch: branch,
+		Reason: code.IterateCommand,
+		Extra:  extra,
+		Hint:   hint,
 	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
 }

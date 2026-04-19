@@ -4,78 +4,122 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-)
+	"time"
 
-// Job is one unit of queued work. Fn receives the queue's root ctx
-// so shutdown cancellation propagates.
-type Job struct {
-	Name string
-	Fn   func(ctx context.Context)
-}
+	"github.com/randheer094/velocity/internal/db"
+)
 
 var (
-	queueMu  sync.Mutex
-	queue    chan Job
-	queueCap int
-	rootCtx  context.Context
-	workerWg sync.WaitGroup
+	queueMu     sync.Mutex
+	queueStart  bool
+	pollCtx     context.Context
+	pollCancel  context.CancelFunc
+	workerWg    sync.WaitGroup
+	queueSoftCap int
 )
 
-// Start boots the FIFO queue. Call once from server.Run.
-func Start(ctx context.Context, workers, size int) {
+// pollInterval is the sleep between claim attempts when the queue is
+// empty. Short enough that a freshly-inserted job runs quickly; long
+// enough that an idle daemon doesn't hammer Postgres.
+const pollInterval = 500 * time.Millisecond
+
+// Insertion + claim helpers are vars so tests can stub them without a
+// live Postgres. Production wiring lives in internal/db.
+var (
+	insertJob = db.InsertWebhookJob
+	claimJob  = db.ClaimNextWebhookJob
+	markDone  = db.MarkWebhookJobDone
+	markFail  = db.MarkWebhookJobFailed
+	resetRun  = db.ResetRunningWebhookJobs
+	countPend = db.CountPendingWebhookJobs
+)
+
+// Start boots the DB-backed queue. Call once from server.Run after
+// db.Start. Idempotent: the second call is a no-op.
+//
+// On the first call we reset any stale `running` rows to `pending` —
+// those came from a previous daemon that died mid-job, and are safe
+// to replay because every agent entry re-reads DB state and no-ops
+// when the ticket is already terminal.
+func Start(ctx context.Context, workers, queueSize int) {
 	if workers < 1 {
 		workers = 1
 	}
-	if size < 1 {
-		size = 1
+	if queueSize < 1 {
+		queueSize = 1
 	}
+
 	queueMu.Lock()
-	if queue != nil {
+	if queueStart {
 		queueMu.Unlock()
 		return
 	}
-	rootCtx = ctx
-	queue = make(chan Job, size)
-	queueCap = size
-	q := queue
+	queueStart = true
+	queueSoftCap = queueSize
+	pollCtx, pollCancel = context.WithCancel(ctx)
 	queueMu.Unlock()
+
+	if n, err := resetRun(pollCtx); err != nil {
+		slog.Error("workqueue: reset running failed", "err", err)
+	} else if n > 0 {
+		slog.Warn("workqueue: reclaimed interrupted jobs", "count", n)
+	}
 
 	for i := 0; i < workers; i++ {
 		workerWg.Add(1)
-		go worker(q)
+		go pollLoop(pollCtx)
 	}
-	slog.Info("workqueue started", "workers", workers, "size", size)
+	slog.Info("workqueue started", "workers", workers, "soft_cap", queueSize)
 }
 
-// Enqueue drops + logs on a full queue rather than blocking the handler.
-func Enqueue(j Job) {
+// Enqueue persists a job row. Drops + logs when the pending backlog
+// exceeds the soft cap, preserving the "never block the webhook
+// handler" contract.
+func Enqueue(kind, name string, payload any) {
 	queueMu.Lock()
-	q := queue
-	cap := queueCap
+	started := queueStart
+	cap := queueSoftCap
 	queueMu.Unlock()
-	if q == nil {
-		slog.Error("workqueue not started, dropping job", "name", j.Name)
+	if !started {
+		slog.Error("workqueue not started, dropping job", "kind", kind, "name", name)
 		return
 	}
-	select {
-	case q <- j:
-		slog.Info("workqueue: enqueued", "name", j.Name, "depth", len(q))
-	default:
-		slog.Error("workqueue full, dropping job", "name", j.Name, "size", cap)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if cap > 0 {
+		if pending, err := countPend(ctx); err == nil && pending >= cap {
+			slog.Error("workqueue full, dropping job", "kind", kind, "name", name, "pending", pending, "cap", cap)
+			return
+		}
 	}
+
+	id, err := insertJob(ctx, kind, name, payload)
+	if err != nil {
+		slog.Error("workqueue: insert failed", "kind", kind, "name", name, "err", err)
+		return
+	}
+	slog.Info("workqueue: enqueued", "id", id, "kind", kind, "name", name)
 }
 
-// Drain closes the queue and waits for workers. Returns early if ctx
-// fires first (shutdown's 10 s budget).
+// Drain cancels the pollers and waits for in-flight jobs. Returns
+// early if ctx fires first (shutdown budget).
 func Drain(ctx context.Context) {
 	queueMu.Lock()
-	q := queue
-	queue = nil
+	cancel := pollCancel
+	started := queueStart
+	queueStart = false
+	pollCtx = nil
+	pollCancel = nil
+	queueSoftCap = 0
 	queueMu.Unlock()
-	if q == nil {
+	if !started {
 		return
 	}
-	close(q)
+	if cancel != nil {
+		cancel()
+	}
 	done := make(chan struct{})
 	go func() { workerWg.Wait(); close(done) }()
 	select {
@@ -84,22 +128,83 @@ func Drain(ctx context.Context) {
 	}
 }
 
-func worker(q <-chan Job) {
+func pollLoop(ctx context.Context) {
 	defer workerWg.Done()
-	for j := range q {
-		runJob(j)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		job, err := claimJob(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Error("workqueue: claim failed", "err", err)
+			sleepCtx(ctx, pollInterval)
+			continue
+		}
+		if job == nil {
+			sleepCtx(ctx, pollInterval)
+			continue
+		}
+		runJob(ctx, job.ID, job.Kind, job.Name, job.Payload)
 	}
 }
 
-func runJob(j Job) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("workqueue: job panic", "name", j.Name, "panic", r)
-		}
+// runJob is split out so tests can drive it directly. It owns the
+// panic recovery and the success/failure bookkeeping on the row.
+func runJob(ctx context.Context, id int64, kind, name string, payload []byte) {
+	slog.Info("workqueue: run", "id", id, "kind", kind, "name", name)
+	var dispatchErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				dispatchErr = panicError(r)
+				slog.Error("workqueue: job panic", "id", id, "name", name, "panic", r)
+			}
+		}()
+		dispatchErr = dispatch(ctx, kind, payload)
 	}()
-	ctx := rootCtx
-	if ctx == nil {
-		ctx = context.Background()
+
+	// Use a detached context for the bookkeeping UPDATE so a canceled
+	// shutdown context doesn't leave the row stuck in 'running'.
+	doneCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if dispatchErr != nil {
+		slog.Error("workqueue: job failed", "id", id, "kind", kind, "name", name, "err", dispatchErr)
+		if err := markFail(doneCtx, id, dispatchErr.Error()); err != nil {
+			slog.Error("workqueue: mark failed update failed", "id", id, "err", err)
+		}
+		return
 	}
-	j.Fn(ctx)
+	if err := markDone(doneCtx, id); err != nil {
+		slog.Error("workqueue: mark done update failed", "id", id, "err", err)
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
+}
+
+type panicErr struct{ v any }
+
+func (e panicErr) Error() string { return panicString(e.v) }
+
+func panicError(v any) error { return panicErr{v: v} }
+
+func panicString(v any) string {
+	switch x := v.(type) {
+	case error:
+		return "panic: " + x.Error()
+	case string:
+		return "panic: " + x
+	default:
+		return "panic: unknown"
+	}
 }

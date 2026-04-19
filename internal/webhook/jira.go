@@ -2,15 +2,12 @@
 package webhook
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 
-	"github.com/randheer094/velocity/internal/arch"
-	"github.com/randheer094/velocity/internal/code"
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/jira"
 	"github.com/randheer094/velocity/internal/status"
@@ -112,11 +109,12 @@ func handleAssigned(key string, fields map[string]any, cfg *config.Config) {
 			slog.Warn("cannot resolve repo_url for developer subtask", "key", key, "parent", parentKey)
 			return
 		}
-		Enqueue(Job{
-			Name: "code.Run:" + key,
-			Fn: func(ctx context.Context) {
-				code.Run(ctx, key, parentKey, repoURL, summary, description)
-			},
+		Enqueue(KindCodeRun, "code.Run:"+key, codeRunPayload{
+			Key:         key,
+			ParentKey:   parentKey,
+			RepoURL:     repoURL,
+			Summary:     summary,
+			Description: description,
 		})
 		return
 	}
@@ -134,11 +132,11 @@ func handleAssigned(key string, fields map[string]any, cfg *config.Config) {
 		return
 	}
 	requirement := summary + "\n\n" + description
-	Enqueue(Job{
-		Name: "arch.Run:" + key,
-		Fn: func(ctx context.Context) {
-			arch.Run(ctx, key, repoURL, summary, requirement)
-		},
+	Enqueue(KindArchRun, "arch.Run:"+key, archRunPayload{
+		Key:         key,
+		RepoURL:     repoURL,
+		Summary:     summary,
+		Requirement: requirement,
 	})
 }
 
@@ -166,18 +164,10 @@ func handleUpdated(key string, fields map[string]any) {
 		}
 		if status.IsSubtaskDismissAlias(st) {
 			slog.Info("jira webhook: subtask DISMISSED", "key", key, "parent", parentKey)
-			Enqueue(Job{
-				Name: "code.OnDismissed:" + key,
-				Fn: func(ctx context.Context) {
-					if err := code.OnDismissed(ctx, key, st); err != nil {
-						slog.Error("code: dismiss failed", "key", key, "err", err)
-					}
-					if parentKey != "" {
-						if err := arch.AdvanceWave(ctx, parentKey); err != nil {
-							slog.Error("arch: advance after dismiss failed", "parent", parentKey, "err", err)
-						}
-					}
-				},
+			Enqueue(KindCodeOnDismissed, "code.OnDismissed:"+key, codeOnDismissedPayload{
+				Key:        key,
+				JiraStatus: st,
+				ParentKey:  parentKey,
 			})
 			return
 		}
@@ -185,26 +175,17 @@ func handleUpdated(key string, fields map[string]any) {
 			return
 		}
 		slog.Info("jira webhook: subtask DONE, advancing parent", "key", key, "parent", parentKey)
-		Enqueue(Job{
-			Name: "arch.AdvanceWave:" + parentKey,
-			Fn: func(ctx context.Context) {
-				if err := arch.AdvanceWave(ctx, parentKey); err != nil {
-					slog.Error("arch: advance failed", "parent", parentKey, "err", err)
-				}
-			},
+		Enqueue(KindArchAdvanceWave, "arch.AdvanceWave:"+parentKey, archAdvanceWavePayload{
+			ParentKey: parentKey,
 		})
 		return
 	}
 
 	if status.IsTaskDismissAlias(st) {
 		slog.Info("jira webhook: parent DISMISSED", "key", key)
-		Enqueue(Job{
-			Name: "arch.OnDismissed:" + key,
-			Fn: func(ctx context.Context) {
-				if err := arch.OnDismissed(ctx, key, st); err != nil {
-					slog.Error("arch: dismiss failed", "key", key, "err", err)
-				}
-			},
+		Enqueue(KindArchOnDismissed, "arch.OnDismissed:"+key, archOnDismissedPayload{
+			Key:        key,
+			JiraStatus: st,
 		})
 	}
 }

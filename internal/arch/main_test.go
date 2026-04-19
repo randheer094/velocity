@@ -165,3 +165,16 @@ func requireDB(t *testing.T) {
 		t.Skip("db not available")
 	}
 }
+
+// cleanPlan removes any residual plan rows (and children) for parentKey so
+// tests exercising the full fresh-plan path aren't short-circuited by the
+// retry guard on a stale DB.
+func cleanPlan(t *testing.T, parentKey string) {
+	t.Helper()
+	if !dbReady {
+		return
+	}
+	ctx := context.Background()
+	_ = db.WipePlanChildren(ctx, parentKey)
+	_, _ = db.Shared().Exec(ctx, "DELETE FROM plans WHERE parent_jira_key=$1", parentKey)
+}

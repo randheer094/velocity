@@ -210,3 +210,14 @@ func requireDB(t *testing.T) {
 		t.Skip("db not available")
 	}
 }
+
+// cleanCodeTask removes any residual code_tasks row for issueKey so
+// tests exercising a fresh Run() aren't short-circuited by the retry
+// guard on a stale DB (test-db.sh persists .pgdata/ across invocations).
+func cleanCodeTask(t *testing.T, issueKey string) {
+	t.Helper()
+	if !dbReady {
+		return
+	}
+	_, _ = db.Shared().Exec(context.Background(), "DELETE FROM code_tasks WHERE issue_key=$1", issueKey)
+}
