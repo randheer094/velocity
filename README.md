@@ -14,7 +14,7 @@ endpoints:
 
 ```
 POST /webhook/jira       (assignments and status transitions)
-POST /webhook/github     (pull_request merged events)
+POST /webhook/github     (pull_request merged, workflow_run failures, /velocity comments)
 ```
 
 No timers, no polling loops, no manual task submission — everything
@@ -311,8 +311,19 @@ Add a repository (or org) webhook posting to
 `http://<your-host>:<port>/webhook/github`:
 
 - **Content type**: `application/json`.
-- **Events**: *Pull requests* only (specifically `closed` with
-  `merged=true`; velocity ignores others).
+- **Events**:
+  - *Pull requests* — `closed` with `merged=true` transitions the
+    sub-task to DONE.
+  - *Workflow runs* — `completed` with `conclusion=failure` on an
+    `IN_REVIEW` sub-task branch triggers velocity to rebase on the
+    default branch, ask the LLM to fix the failure, and force-push
+    with lease. Events on unknown branches are ignored.
+  - *Issue comments* — a PR comment starting with `/velocity
+    <instruction>` on an `IN_REVIEW` sub-task branch triggers the
+    same iterate flow with the instruction as LLM context. If the PR
+    is not in velocity's scope, velocity replies `Cannot perform any
+    action on this` and stops. Comments that don't start with
+    `/velocity` are ignored.
 
 Signature: `X-Hub-Signature-256` HMAC-SHA256. Mismatches → `401`.
 

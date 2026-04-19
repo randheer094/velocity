@@ -224,3 +224,87 @@ func TestNewWithoutToken(t *testing.T) {
 		t.Error("New must return non-nil")
 	}
 }
+
+func TestAddPRCommentOK(t *testing.T) {
+	var posted bool
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues/7/comments") {
+			posted = true
+			body, _ := io.ReadAll(r.Body)
+			var p map[string]any
+			_ = json.Unmarshal(body, &p)
+			if p["body"] != "hi" {
+				t.Errorf("body = %v", p)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	})
+	if !c.AddPRComment("o/r", 7, "hi") || !posted {
+		t.Errorf("AddPRComment should succeed")
+	}
+}
+
+func TestAddPRCommentFail(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	if c.AddPRComment("o/r", 1, "hi") {
+		t.Error("should return false on 403")
+	}
+}
+
+func TestAddPRCommentHTTPError(t *testing.T) {
+	c := &Client{token: "t", http: &http.Client{Transport: errTransport{}}}
+	if c.AddPRComment("o/r", 1, "hi") {
+		t.Error("should return false on transport error")
+	}
+}
+
+type errTransport struct{}
+
+func (errTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errFake
+}
+
+var errFake = &fakeError{"boom"}
+
+type fakeError struct{ s string }
+
+func (e *fakeError) Error() string { return e.s }
+
+func TestPRHeadBranchOK(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/9") {
+			_, _ = w.Write([]byte(`{"head":{"ref":"PROJ-1"}}`))
+			return
+		}
+		w.WriteHeader(404)
+	})
+	if got := c.PRHeadBranch("o/r", 9); got != "PROJ-1" {
+		t.Errorf("PRHeadBranch = %q", got)
+	}
+}
+
+func TestPRHeadBranchErrors(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	old := getBackoffs
+	getBackoffs = []time.Duration{0, 0, 0}
+	defer func() { getBackoffs = old }()
+	if got := c.PRHeadBranch("o/r", 1); got != "" {
+		t.Errorf("expected empty on 403: %q", got)
+	}
+}
+
+func TestPRHeadBranchBadJSON(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	})
+	if got := c.PRHeadBranch("o/r", 1); got != "" {
+		t.Errorf("expected empty: %q", got)
+	}
+}

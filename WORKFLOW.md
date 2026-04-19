@@ -156,6 +156,28 @@ package cancel registry and wipes the workspace.
   `code_tasks` row with `jira_status` set to the dismiss alias.
   The parent's wave advances past it like a merged sub-task.
 
+## PR iteration (in_review only)
+
+Two GitHub events can trigger in-place updates on an open sub-task PR:
+
+- **CI failure** — `workflow_run` with `conclusion=failure`. Velocity
+  looks the branch up in `code_tasks`; if the sub-task is `IN_REVIEW`,
+  it re-uses the existing workspace, fetches, resets the branch to
+  `origin/<key>`, rebases onto the default branch, runs the code LLM
+  with the failure URL as context, commits, and force-pushes with
+  lease. Unknown branches and non-`IN_REVIEW` statuses are ignored.
+- **`/velocity <instruction>` comment** — `issue_comment` with
+  `action=created` on a PR. If the branch has no `code_tasks` row or
+  the row is not `IN_REVIEW`, velocity posts `Cannot perform any
+  action on this` to the PR and stops. Otherwise it runs the same
+  fetch → rebase → LLM → force-push loop with the user instruction as
+  context.
+
+Iteration keeps the sub-task in `IN_REVIEW`; it never transitions to
+`CODING_FAILED`. Iterate failures are logged, commented on Jira, and
+commented on the PR; operators retry by posting another `/velocity`
+comment.
+
 ## Dispatch
 
 The HTTP handlers do zero work. Each webhook:
@@ -193,6 +215,8 @@ handler ──► webhook.Enqueue(Job{Name, Fn})
 | Sub-task transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `code.OnDismissed` + `arch.AdvanceWave` |
 | Parent transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `arch.OnDismissed` |
 | PR merged | `POST /webhook/github` → `webhook.Enqueue` → `code.MarkMerged` |
+| CI failed on a sub-task PR (IN_REVIEW) | `POST /webhook/github` (`workflow_run`) → `webhook.Enqueue` → `code.Iterate` |
+| `/velocity` comment on a sub-task PR (IN_REVIEW) | `POST /webhook/github` (`issue_comment`) → `webhook.Enqueue` → `code.Iterate` |
 
 All cross-component communication — including arch→code — goes via
 Jira (assignment, transition) or GitHub (PR events). Never via

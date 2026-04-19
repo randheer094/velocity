@@ -68,6 +68,43 @@ func Push(repoDir, branchName string) error {
 	return err
 }
 
+// FetchAll updates every remote ref so RebaseOnto and CheckoutBranch
+// can see the latest origin state.
+func FetchAll(repoDir string) error {
+	_, err := run(repoDir, "fetch", "--all", "--prune")
+	return err
+}
+
+// CheckoutBranch switches to an existing branch without creating one.
+func CheckoutBranch(repoDir, branchName string) error {
+	_, err := run(repoDir, "checkout", branchName)
+	return err
+}
+
+// ResetHardToRemote points the current branch at origin/<branchName>
+// so iteration picks up any commits pushed after the workspace was
+// created (e.g. maintainer pushes while CI was failing).
+func ResetHardToRemote(repoDir, branchName string) error {
+	_, err := run(repoDir, "reset", "--hard", "origin/"+branchName)
+	return err
+}
+
+// RebaseOnto rebases the current branch onto origin/<baseBranch>.
+// On conflict the rebase is aborted before the error returns.
+func RebaseOnto(repoDir, baseBranch string) error {
+	if _, err := run(repoDir, "rebase", "origin/"+baseBranch); err != nil {
+		_, _ = run(repoDir, "rebase", "--abort")
+		return err
+	}
+	return nil
+}
+
+// WorkspaceExists is a small helper so callers don't reach into os.
+func WorkspaceExists(repoDir string) bool {
+	_, err := os.Stat(repoDir + "/.git")
+	return err == nil
+}
+
 // PushForceWithLease refreshes an existing PR branch on code retry;
 // fails rather than clobbers if the remote has moved.
 func PushForceWithLease(repoDir, branchName string) error {

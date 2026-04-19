@@ -777,3 +777,97 @@ func TestGithubHandlerMergedJiraBranch(t *testing.T) {
 		return false
 	})
 }
+
+func TestGithubHandlerWorkflowRunIgnoredConclusion(t *testing.T) {
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"success","head_branch":"PROJ-2"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerWorkflowRunInvalidJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("bad")))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerWorkflowRunNonJiraBranch(t *testing.T) {
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"feature/x"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerWorkflowRunUnknownBranch(t *testing.T) {
+	// No DB, so GetCodeTask returns nil — handler ignores.
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"failure","head_branch":"PROJ-99"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "workflow_run")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerIssueCommentInvalidJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("bad")))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerIssueCommentNonPR(t *testing.T) {
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"created","issue":{"number":1},"comment":{"body":"/velocity do"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerIssueCommentNoPrefix(t *testing.T) {
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"created","issue":{"number":1,"pull_request":{}},"comment":{"body":"just chatting"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestGithubHandlerIssueCommentOutOfScope(t *testing.T) {
+	// No DB + no live GitHub — lookupBranchForPR returns "" and task is
+	// nil → handler replies via AddPRComment (network call is best-effort,
+	// we just exercise the branch).
+	oldLookup := lookupBranchForPR
+	lookupBranchForPR = func(string, int) string { return "" }
+	defer func() { lookupBranchForPR = oldLookup }()
+
+	rec := httptest.NewRecorder()
+	body := []byte(`{"action":"created","issue":{"number":5,"pull_request":{}},"repository":{"full_name":"o/r"},"comment":{"body":"/velocity help"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	GithubHandler{}.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d", rec.Code)
+	}
+}

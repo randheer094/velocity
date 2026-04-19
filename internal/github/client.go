@@ -164,6 +164,41 @@ func (c *Client) updatePR(repoFullName string, number int, title, body string) {
 	}
 }
 
+// PRHeadBranch returns the head ref of a PR, or "" on error.
+func (c *Client) PRHeadBranch(repoFullName string, number int) string {
+	path := fmt.Sprintf("/repos/%s/pulls/%d", repoFullName, number)
+	resp, body, err := c.getWithRetry(path)
+	if err != nil || resp.StatusCode >= 400 {
+		return ""
+	}
+	var out struct {
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return ""
+	}
+	return out.Head.Ref
+}
+
+// AddPRComment posts an issue comment on a pull request. PRs are
+// issues in GitHub's REST model, so this uses /issues/{num}/comments.
+func (c *Client) AddPRComment(repoFullName string, number int, body string) bool {
+	payload := map[string]any{"body": body}
+	path := fmt.Sprintf("/repos/%s/issues/%d/comments", repoFullName, number)
+	resp, respBody, err := c.do(http.MethodPost, path, payload)
+	if err != nil {
+		slog.Warn("github add comment error", "repo", repoFullName, "num", number, "err", err)
+		return false
+	}
+	if resp.StatusCode >= 400 {
+		slog.Warn("github add comment failed", "repo", repoFullName, "num", number, "status", resp.StatusCode, "body", string(respBody))
+		return false
+	}
+	return true
+}
+
 // ParseRepoURL turns a GitHub URL into "owner/repo".
 func ParseRepoURL(repoURL string) (string, error) {
 	u := strings.TrimSpace(repoURL)
