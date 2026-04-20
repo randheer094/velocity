@@ -400,6 +400,35 @@ func TestCommentIssue(t *testing.T) {
 	}
 }
 
+func TestCommentIssueCode(t *testing.T) {
+	var seen map[string]any
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&seen)
+		w.Write([]byte(`{}`))
+	})
+	if !c.CommentIssueCode("X-1", "│ ABC-1 │") {
+		t.Error("expected true")
+	}
+	body, _ := seen["body"].(map[string]any)
+	content, _ := body["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("unexpected content: %v", content)
+	}
+	node, _ := content[0].(map[string]any)
+	if node["type"] != "codeBlock" {
+		t.Errorf("expected codeBlock, got %v", node["type"])
+	}
+}
+
+func TestCommentIssueCodeBadPost(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not json"))
+	})
+	if c.CommentIssueCode("X-1", "hi") {
+		t.Error("expected false on bad JSON post")
+	}
+}
+
 func TestListSubtasks(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"fields":{"subtasks":[{"key":"S-1"},{"key":"S-2"},{"key":""}]}}`))

@@ -174,6 +174,12 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		}
 	}
 
+	if diagram := renderWavesASCII(p.Waves); diagram != "" {
+		if !client.CommentIssueCode(parentKey, diagram) {
+			slog.Warn("arch: failed to post plan diagram comment", "key", parentKey)
+		}
+	}
+
 	*stage = "save-plan"
 	if err := db.SavePlan(ctx, p); err != nil {
 		return fmt.Errorf("save plan: %w", err)

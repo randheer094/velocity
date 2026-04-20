@@ -342,6 +342,27 @@ func (c *Client) CommentIssue(issueKey, body string) bool {
 	return raw != nil
 }
 
+// CommentIssueCode posts body inside an ADF codeBlock so monospace
+// content (e.g. ASCII diagrams) keeps its alignment when rendered.
+func (c *Client) CommentIssueCode(issueKey, body string) bool {
+	payload := map[string]any{
+		"body": map[string]any{
+			"type":    "doc",
+			"version": 1,
+			"content": []any{
+				map[string]any{
+					"type": "codeBlock",
+					"content": []any{
+						map[string]any{"type": "text", "text": body},
+					},
+				},
+			},
+		},
+	}
+	raw := c.post("issue/"+issueKey+"/comment", payload)
+	return raw != nil
+}
+
 func (c *Client) ListSubtasks(parentKey string) []string {
 	raw := c.get("issue/"+parentKey, url.Values{"fields": {"subtasks"}})
 	root, ok := raw.(map[string]any)
