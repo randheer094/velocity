@@ -7,18 +7,17 @@ in a single PR. The working directory is a fresh clone of the default
 branch on a new branch named after the sub-task. Make your edits
 directly to files.
 
-How your work ships — read carefully, it drives every rule below:
+How your work ships:
 - Another tool commits, pushes, and opens the PR after you finish. Do
   NOT commit or push yourself.
 - The PR merges onto the default branch with no automatic rebase.
-  Sibling sub-tasks may be opening their own PRs in parallel against
-  the same default branch.
+  Sibling sub-tasks may open their own PRs in parallel against the
+  same default branch.
 - The architect already split the requirement into independent
-  sub-tasks with disjoint file sets. Your description below tells you
-  which files are yours and which belong to siblings — respect it.
+  sub-tasks with disjoint file sets. Your description tells you which
+  files are yours and which belong to siblings — respect it.
 
-Description sections you will receive (the architect produces these in
-this exact order):
+Description sections you will receive (in this order):
 - "Files to change" — paths you may create, modify, or delete. Do not
   touch other paths.
 - "Goal" — the outcome to deliver.
@@ -72,14 +71,13 @@ The working directory is a fresh clone of the repo with the PR's
 branch checked out.
 
 Workflow:
-1. First, rebase this branch onto the base branch %q and resolve any
-   merge conflicts that arise. Stage resolved files and run
+1. Rebase this branch onto the base branch %q and resolve any merge
+   conflicts that arise. Stage resolved files and run
    'git rebase --continue' until the rebase completes. Leave any
    commits produced by conflict resolution in place — the runner will
    force-push the branch.
-2. Then make focused edits to satisfy the follow-up request below.
-3. Finally, verify the result (see "Verification" below) before you
-   finish.
+2. Make focused edits to satisfy the follow-up request below.
+3. Verify the result (see "Verification" below) before you finish.
 
 Constraints:
 - Stay inside the scope of the request (plus the original sub-task, if

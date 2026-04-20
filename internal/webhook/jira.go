@@ -17,6 +17,29 @@ import (
 // X-Hub-Signature-256 — only the header name differs.
 const jiraSignatureHeader = "X-Hub-Signature"
 
+// MaxRequirementChars caps the summary+description text handed to the
+// architect LLM. Sized to stay well within the Claude Code 250K-token
+// context window after reserving room for the system prompt, tool
+// schemas, and tool-call rounds that read the codebase during planning.
+// The Jira ticket itself is untouched; only the text sent to the LLM
+// is truncated.
+const MaxRequirementChars = 150_000
+
+const requirementTruncationMarker = "\n\n[…truncated to fit 250K context window]"
+
+// capRequirement trims s to MaxRequirementChars, appending a marker
+// on truncation so the architect knows the tail was dropped.
+func capRequirement(s string) string {
+	if len(s) <= MaxRequirementChars {
+		return s
+	}
+	keep := MaxRequirementChars - len(requirementTruncationMarker)
+	if keep < 0 {
+		keep = 0
+	}
+	return s[:keep] + requirementTruncationMarker
+}
+
 type JiraHandler struct{}
 
 func (h JiraHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +155,11 @@ func handleAssigned(key string, fields map[string]any, cfg *config.Config) {
 		return
 	}
 	requirement := summary + "\n\n" + description
+	if len(requirement) > MaxRequirementChars {
+		slog.Warn("jira webhook: requirement exceeds cap, truncating",
+			"key", key, "length", len(requirement), "cap", MaxRequirementChars)
+		requirement = capRequirement(requirement)
+	}
 	Enqueue(KindArchRun, "arch.Run:"+key, archRunPayload{
 		Key:         key,
 		RepoURL:     repoURL,

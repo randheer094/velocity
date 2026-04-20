@@ -97,30 +97,21 @@ cd velocity
 make install        # build + move to $INSTALL_DIR (default ~/.local/bin)
 ```
 
-Override the install location:
-
-```bash
-make install INSTALL_DIR=/usr/local/bin
-```
-
-To build without installing (e.g. for local testing), use
-`make build` — produces `./velocity` in the repo root.
+Override the install location with `make install INSTALL_DIR=/usr/local/bin`.
+Use `make build` to produce `./velocity` without installing.
 
 ## Configure
 
 Velocity reads `~/.velocity/config.yaml` (override the data directory
-with `--dir`). Copy the example and edit:
+with `--dir`). Copy the example and edit — it covers Jira identifiers,
+per-bucket status names, LLM options per role, and server tuning. See
+[Configuration reference](#configuration-reference) for the full shape.
 
 ```bash
 mkdir -p ~/.velocity
 cp config.example.yaml ~/.velocity/config.yaml
 $EDITOR ~/.velocity/config.yaml
 ```
-
-The file covers Jira identifiers, per-bucket status names, LLM
-options per role, and the server/database sections. See
-[Configuration reference](#configuration-reference) for the full
-shape.
 
 ### Secrets (env vars)
 
@@ -268,22 +259,19 @@ llm:
 ### Status buckets
 
 Each canonical bucket maps to one **default** Jira workflow status
-plus optional **aliases**. The default is the status velocity
-transitions *into*; aliases resolve *into* the bucket on reads
-(case-insensitive). One bucket can absorb multiple real-world
-Jira statuses.
+(what velocity transitions *into*) plus optional case-insensitive
+**aliases** that resolve back into the bucket on reads. One bucket can
+absorb multiple real-world Jira statuses.
 
 Canonical buckets:
 
 - **Parent**: `new`, `planning`, `planning_failed`, `coding`, `done`.
 - **Sub-task**: `new`, `coding`, `coding_failed`, `in_review`, `done`.
 
-The conventional pattern is to add `Dismissed` as an alias of
-`done`. Cascade detection (a parent dismissal cascades to sub-tasks)
-keys off the alias name; the raw Jira name is preserved on each
-row's `jira_status` column so dismissed and merged are
-distinguishable in the DB even though both collapse to canonical
-`done`.
+The conventional pattern adds `Dismissed` as an alias of `done`.
+Cascade detection (a parent dismissal cascades to sub-tasks) keys off
+the alias name; each row's `jira_status` column preserves the raw Jira
+name so dismissed and merged remain distinguishable in the DB.
 
 ### Server tuning
 
@@ -296,10 +284,9 @@ distinguishable in the DB even though both collapse to canonical
   `webhook_jobs` table. Enqueue checks the pending count first; if
   the backlog is larger than `queue_size`, the job is dropped and
   logged. Webhook senders receive `202` regardless.
-- The queue is Postgres-backed: enqueue inserts a row; workers claim
-  via `SELECT … FOR UPDATE SKIP LOCKED`. Jobs survive daemon
-  restart — any row stuck in `running` when the daemon died is
-  reset to `pending` on next start. For a live view of the queue:
+- The queue is Postgres-backed (`SELECT … FOR UPDATE SKIP LOCKED`)
+  and survives daemon restart — rows stuck in `running` when the
+  daemon died are reset to `pending` on next start. Live view:
   `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;`.
 
 ### LLM per-role settings
@@ -338,21 +325,20 @@ Add a repository (or org) webhook posting to
 - **Events**:
   - *Pull requests* — `closed` with `merged=true` transitions the
     sub-task to DONE.
-  - *Workflow runs* — `completed` with `conclusion=failure` whose
-    `pull_requests` array is non-empty triggers an iterate run on the
-    PR's head branch: fresh clone, LLM prompted to rebase onto the
-    default branch and resolve conflicts, then fix the failure, then
-    force-push with lease. Velocity fetches the failing-job logs via
-    the Actions API and inlines the tail into the LLM prompt, and
-    derives a short commit subject (`<branch>: fix CI: <first error>`)
-    from it. Runs without a PR (pushes to the default branch) are
-    ignored.
+  - *Workflow runs* — `completed` with `conclusion=failure` and a
+    non-empty `pull_requests` array triggers an iterate run on the
+    PR's head branch: fresh clone, LLM rebases onto the default
+    branch and resolves conflicts, fixes the failure, then the runner
+    force-pushes with lease. Velocity fetches the failing-job logs
+    via the Actions API, inlines the tail into the prompt, and
+    derives a commit subject (`<branch>: fix CI: <first error>`).
+    Runs without a PR (pushes to the default branch) are ignored.
   - *Issue comments* — a PR comment starting with `/velocity
     <instruction>` triggers the same iterate flow with the
-    instruction as LLM context. Empty instructions get a usage reply
-    on the PR; comments that don't start with `/velocity` are
-    ignored. The PR does **not** need to have been opened by
-    velocity — any PR in a webhook-configured repo can be iterated.
+    instruction as LLM context. Empty instructions get a usage reply;
+    comments not starting with `/velocity` are ignored. The PR need
+    not have been opened by velocity — any PR in a webhook-configured
+    repo can be iterated.
 
 Signature: `X-Hub-Signature-256` HMAC-SHA256. Mismatches → `401`.
 
@@ -383,45 +369,46 @@ human-readable label.
 └── workspace/<JIRA-KEY>/    per-ticket git clones (ephemeral)
 ```
 
-Plan and code-task state lives in the external Postgres instance.
-Workspaces are removed once a ticket completes; DB rows stay as
-history.
-
-Branches are named **exactly** after the sub-task Jira key (e.g.
-`ENG-102`, not `feature/ENG-102`).
+Plan and code-task state lives in the external Postgres instance;
+workspaces are removed once a ticket completes, DB rows stay as
+history. Branches are named **exactly** after the sub-task Jira key
+(e.g. `ENG-102`, not `feature/ENG-102`).
 
 ## Dependency tracking
 
-Every plan persists its waves in order. For any sub-task you can
-query its neighbouring waves:
+Plans persist waves in order; for any sub-task you can query its
+neighbouring waves:
 
 - **predecessors** — tickets that must be DONE before this one can
   start.
 - **successors** — tickets that become eligible once this one is
   DONE.
 
-The `internal/db` package exposes `TaskPredecessors(ctx, jiraKey)`
-and `TaskSuccessors(ctx, jiraKey)` for programmatic lookups.
+`internal/db` exposes `TaskPredecessors(ctx, jiraKey)` and
+`TaskSuccessors(ctx, jiraKey)` for programmatic lookups.
 
 ## Limitations
 
 ### Prompt size
 
-Velocity passes every LLM prompt as the final positional argument to
-`claude --print`, so prompt size is bounded by two external ceilings
-— there is no velocity-side cap or truncation:
+Prompts are passed to `claude --print` as the final argv, so size is
+bounded by three ceilings:
 
-- **OS `ARG_MAX`.** Total argv + env must fit under the kernel limit
-  (~256 KB on macOS, ~2 MB on Linux). Exceeding it fails the
-  subprocess with `E2BIG` before the prompt ever reaches Claude.
-- **Claude model context window.** Whatever the configured
-  `llm.<role>.model` accepts. Overflow surfaces as an API error
-  from the CLI.
+- **Requirement cap (velocity-side).** The assembled
+  `summary + "\n\n" + description` is capped at **150,000 characters**
+  (≈ 50K tokens) before it reaches the architect LLM. Over-cap input
+  is truncated with a `[…truncated to fit 250K context window]` marker
+  and logged at warn. The Jira ticket is untouched — only the text
+  handed to Claude is capped. Sized to leave ~200K tokens of the 250K
+  window for the system prompt, tool schemas, and codebase reads.
+- **OS `ARG_MAX`.** argv + env must fit under the kernel limit
+  (~256 KB on macOS, ~2 MB on Linux); overflow fails with `E2BIG`.
+- **Model context window.** Whatever the configured
+  `llm.<role>.model` accepts; overflow surfaces as an API error.
 
-In practice the arch and code prompts are dominated by the Jira
-summary + description and stay well below both limits. Unusually
-large descriptions or pasted logs in ticket fields are the only
-realistic way to hit either ceiling today.
+Typical Jira tickets stay well below every limit. Unusually long
+product specs should be split across parents or will have their tail
+truncated at 150K characters.
 
 ## Test
 
@@ -431,16 +418,15 @@ make vet        # go vet ./...
 make test-e2e   # boots ./compose.yml postgres, runs `go test ./...`, tears down
 ```
 
-`make test-e2e` wraps `scripts/test-db.sh`, which starts
+`make test-e2e` wraps `scripts/test-db.sh`: starts
 `docker compose up -d postgres`, waits for readiness, exports the
-full `VELOCITY_DB_*` set pointed at `127.0.0.1:55432`, runs the
-test suite, and tears the container down on exit (via `trap`, even
-on failure).
+`VELOCITY_DB_*` set pointed at `127.0.0.1:55432`, runs the suite, and
+tears the container down on exit (via `trap`, even on failure).
 
 ## Deploy
 
-Velocity is a single binary. Anywhere you can run the binary and
-reach Jira + GitHub + Postgres works. Two common setups:
+Anywhere you can run the binary and reach Jira + GitHub + Postgres
+works. Two common setups:
 
 ### systemd (Linux)
 
