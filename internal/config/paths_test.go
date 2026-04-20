@@ -15,9 +15,6 @@ func TestSetDirAndPaths(t *testing.T) {
 	if AgentDir != dir {
 		t.Errorf("AgentDir = %q, want %q", AgentDir, dir)
 	}
-	if DataDir != filepath.Join(dir, "data") {
-		t.Errorf("DataDir = %q", DataDir)
-	}
 	if WorkspaceDir != filepath.Join(dir, "workspace") {
 		t.Errorf("WorkspaceDir = %q", WorkspaceDir)
 	}
@@ -43,7 +40,7 @@ func TestEnsureRuntimeDirs(t *testing.T) {
 	if err := EnsureRuntimeDirs(); err != nil {
 		t.Fatalf("EnsureRuntimeDirs: %v", err)
 	}
-	for _, d := range []string{AgentDir, DataDir, WorkspaceDir} {
+	for _, d := range []string{AgentDir, WorkspaceDir} {
 		fi, err := os.Stat(d)
 		if err != nil || !fi.IsDir() {
 			t.Errorf("expected dir at %q: %v", d, err)

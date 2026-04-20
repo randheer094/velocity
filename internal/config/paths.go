@@ -1,5 +1,5 @@
 // Package config owns Config, paths, and secret env var names.
-// AgentDir / DataDir / WorkspaceDir are set once via SetDir at startup.
+// AgentDir / WorkspaceDir are set once via SetDir at startup.
 package config
 
 import (
@@ -12,13 +12,11 @@ const (
 	configFilename  = "config.yaml"
 	pidFilename     = "daemon.pid"
 	logFilename     = "daemon.log"
-	dataSubdir      = "data"
 	workspaceSubdir = "workspace"
 )
 
 var (
 	AgentDir     string
-	DataDir      string
 	WorkspaceDir string
 )
 
@@ -29,7 +27,6 @@ func init() {
 // SetDir points velocity at a new data directory and reloads the config.
 func SetDir(path string) {
 	AgentDir = expandHome(path)
-	DataDir = filepath.Join(AgentDir, dataSubdir)
 	WorkspaceDir = filepath.Join(AgentDir, workspaceSubdir)
 
 	loadConfig()
@@ -43,9 +40,9 @@ func WorkspacePath(jiraKey string) string {
 	return filepath.Join(WorkspaceDir, jiraKey)
 }
 
-// EnsureRuntimeDirs creates AgentDir, DataDir, and WorkspaceDir.
+// EnsureRuntimeDirs creates AgentDir and WorkspaceDir.
 func EnsureRuntimeDirs() error {
-	for _, d := range []string{AgentDir, DataDir, WorkspaceDir} {
+	for _, d := range []string{AgentDir, WorkspaceDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}

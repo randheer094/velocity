@@ -58,15 +58,15 @@ func TestRunMissingConfig(t *testing.T) {
 }
 
 // TestRunEnsureRuntimeDirsFails covers the EnsureRuntimeDirs error branch.
-// SetDir derives DataDir = AgentDir/data; placing a regular file at that
-// path makes MkdirAll fail with ENOTDIR.
+// SetDir derives WorkspaceDir = AgentDir/workspace; placing a regular file
+// at that path makes MkdirAll fail with ENOTDIR.
 func TestRunEnsureRuntimeDirsFails(t *testing.T) {
 	dir := t.TempDir()
 	cfg := fmt.Sprintf(cfgTmpl, freePort(t))
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "data"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "workspace"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config.SetDir(dir)
