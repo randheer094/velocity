@@ -37,9 +37,10 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
 9. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
 10. [Files on disk](#files-on-disk)
 11. [Dependency tracking](#dependency-tracking)
-12. [Test](#test)
-13. [Deploy](#deploy)
-14. [Troubleshooting](#troubleshooting)
+12. [Limitations](#limitations)
+13. [Test](#test)
+14. [Deploy](#deploy)
+15. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -401,6 +402,26 @@ query its neighbouring waves:
 
 The `internal/db` package exposes `TaskPredecessors(ctx, jiraKey)`
 and `TaskSuccessors(ctx, jiraKey)` for programmatic lookups.
+
+## Limitations
+
+### Prompt size
+
+Velocity passes every LLM prompt as the final positional argument to
+`claude --print`, so prompt size is bounded by two external ceilings
+— there is no velocity-side cap or truncation:
+
+- **OS `ARG_MAX`.** Total argv + env must fit under the kernel limit
+  (~256 KB on macOS, ~2 MB on Linux). Exceeding it fails the
+  subprocess with `E2BIG` before the prompt ever reaches Claude.
+- **Claude model context window.** Whatever the configured
+  `llm.<role>.model` accepts. Overflow surfaces as an API error
+  from the CLI.
+
+In practice the arch and code prompts are dominated by the Jira
+summary + description and stay well below both limits. Unusually
+large descriptions or pasted logs in ticket fields are the only
+realistic way to hit either ceiling today.
 
 ## Test
 
