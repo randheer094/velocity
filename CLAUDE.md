@@ -7,19 +7,16 @@ agent. See [README.md](./README.md) for install/run, and
 Contributor rules live in
 [.claude/rules/conventions.md](./.claude/rules/conventions.md) and
 [.claude/rules/maintenance.md](./.claude/rules/maintenance.md).
-Lifecycle details (states, wave math, failure/retry/dismiss) live
-in [WORKFLOW.md](./WORKFLOW.md). Don't duplicate them here.
 
 ## Universal rules
 
 1. **Webhooks are the only driver.** Two endpoints, no tickers, no polling.
-2. **Two agents, one manager.** `arch` plans and manages waves; `code` executes one sub-task. `code` must not import `arch`; `arch` must not import `code`.
-3. **Shared libraries stay agent-agnostic.** No webhook handlers, no CLI imports, no cross-agent knowledge in `internal/{config,jira,github,git,llm,status,data,db}`.
-4. **Jira issue keys are IDs.** DB rows, workspaces, git branches, PR titles all key off the issue key directly. Sub-task branch ≡ sub-task key.
-5. **External Postgres; workspaces ephemeral.** Every DB connection field (`VELOCITY_DB_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_NAME`) comes from env; `sslmode` is hardcoded `disable`. Clones under `~/.velocity/workspace/<KEY>/`. Schema evolves via forward-only numbered migrations in `internal/db/migrations/` — never edit a shipped migration.
-6. **Config is YAML; secrets are env vars.** One `config.yaml` (operator-written; see `config.example.yaml`) for Jira, LLM, and server tuning. Everything else (API tokens, webhook secrets, all Postgres fields) is env. No setup command, no runtime config reload.
-7. **DB-backed FIFO dispatch with parallel cap.** Handlers insert a row into `webhook_jobs` and return 202; workers claim via `FOR UPDATE SKIP LOCKED` and dispatch by `kind`. Jobs survive daemon restart.
-8. **Failures are first-class states.** `planning_failed`, `coding_failed` (operator-facing "Dev Failed") are real DB statuses. `Dismissed` collapses to canonical `done` via the configured alias; the raw Jira name lives in `jira_status`. Retry = re-assign; dismiss is terminal.
+2. **Two agents, one manager.** `arch` plans waves; `code` executes one sub-task. Agents don't import each other, and shared libraries stay agent-agnostic — no webhook handlers, no CLI imports, no cross-agent knowledge.
+3. **Jira issue keys are IDs.** DB rows, workspaces, git branches, PR titles all key off the issue key directly. Sub-task branch ≡ sub-task key.
+4. **External Postgres; workspaces ephemeral.** Every DB connection field (`VELOCITY_DB_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_NAME`) comes from env; `sslmode` is hardcoded `disable`. Clones under `~/.velocity/workspace/<KEY>/`. Schema evolves via forward-only numbered migrations in `internal/db/migrations/` — never edit a shipped migration.
+5. **Config is YAML; secrets are env vars.** One `config.yaml` (operator-written; see `config.example.yaml`) for Jira, LLM, and server tuning. Everything else (API tokens, webhook secrets, all Postgres fields) is env. No setup command, no runtime config reload.
+6. **DB-backed FIFO dispatch with parallel cap.** Handlers insert a row into `webhook_jobs` and return 202; workers claim via `FOR UPDATE SKIP LOCKED` and dispatch by `kind`. Jobs survive daemon restart.
+7. **Failures are first-class states.** `planning_failed`, `coding_failed` (operator-facing "Dev Failed") are real DB statuses. `Dismissed` collapses to canonical `done` via the configured alias; the raw Jira name lives in `jira_status`. Retry = re-assign; dismiss is terminal.
 
 ## Editing this index
 

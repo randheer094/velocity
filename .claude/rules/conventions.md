@@ -63,9 +63,6 @@ parallel loop.
   `webhook → arch.AdvanceWave` on sub-task DONE.
 - ❌ `arch` must not import `code`. Wave start is a Jira
   assignment — the Jira webhook then invokes `code.Run`.
-- Shared libraries (`config`, `jira`, `github`, `git`, `llm`,
-  `status`, `data`, `db`) have no webhook handlers, no CLI imports,
-  and no cross-imports to `arch` or `code`.
 
 Cross-component communication beyond library calls goes via Jira
 (assignment, transition) or GitHub (PR events). Never shared

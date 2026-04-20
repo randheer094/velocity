@@ -38,8 +38,7 @@ package below the threshold are rejected.
   tests actually execute).
 - If a change adds a code path that's hard to cover, add a test
   for it in the same PR — don't ship the path uncovered.
-- Coverage exemptions live in this file (none currently). Adding
-  one requires explicit justification, not silence.
+- Coverage exemptions live here (none currently); adding one requires explicit justification.
 
 `cmd/velocity` is exempt — it's a thin `main` shim with no logic
 worth testing in isolation.
