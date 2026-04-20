@@ -2,7 +2,6 @@ package code
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
@@ -30,13 +29,6 @@ func redactAndTruncate(s string) string {
 		s = s[:maxErrChars] + "..."
 	}
 	return s
-}
-
-func formatFailureComment(role, stage, msg string) string {
-	return fmt.Sprintf(
-		"Velocity %s failed at stage *%s*.\n\n```\n%s\n```\n\nSee daemon.log for full details.",
-		role, stage, msg,
-	)
 }
 
 // recordFailure is the single failure sink for code.Run. Best-effort:

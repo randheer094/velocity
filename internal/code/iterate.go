@@ -155,18 +155,13 @@ func reportIterateFailure(branch, prURL string, reason IterateReason, stage stri
 	// Jira comment only makes sense when the branch is a Jira issue key.
 	if data.ValidJiraKey(branch) {
 		if client := jira.Shared(); client != nil {
-			_ = client.CommentIssue(branch, fmt.Sprintf(
-				"Velocity iterate (%s) failed at stage *%s*.\n\n```\n%s\n```\n\nSee daemon.log for full details.",
-				reason, stage, msg,
-			))
+			_ = client.CommentIssue(branch, formatIterateJiraComment(string(reason), stage, msg))
 		}
 	}
 
 	if prURL != "" {
 		if repo, num := parsePRURL(prURL); repo != "" && num > 0 {
-			github.New().AddPRComment(repo, num,
-				fmt.Sprintf("Velocity could not complete the requested action (stage `%s`):\n\n```\n%s\n```",
-					stage, msg))
+			github.New().AddPRComment(repo, num, formatIteratePRComment(stage, msg))
 		}
 	}
 }
