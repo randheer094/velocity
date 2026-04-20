@@ -232,13 +232,153 @@ func TestTransitionTargetMissing(t *testing.T) {
 }
 
 func TestCreateSubtask(t *testing.T) {
+	var gotBody []byte
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
 		w.Write([]byte(`{"key":"NEW-99"}`))
 	})
-	got := c.CreateSubtask("PROJ", "title", "desc", "PROJ-1")
+	desc := "Goal: do it\n\n- one\n- two"
+	got := c.CreateSubtask("PROJ", "title", desc, "PROJ-1")
 	if got != "NEW-99" {
 		t.Errorf("CreateSubtask = %q", got)
 	}
+	var parsed map[string]any
+	if err := json.Unmarshal(gotBody, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	fields := parsed["fields"].(map[string]any)
+	d := fields["description"].(map[string]any)
+	if d["type"] != "doc" {
+		t.Errorf("description type = %v", d["type"])
+	}
+	content := d["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected 2 blocks, got %d: %v", len(content), content)
+	}
+	if content[0].(map[string]any)["type"] != "paragraph" {
+		t.Errorf("first block type = %v", content[0])
+	}
+	if content[1].(map[string]any)["type"] != "bulletList" {
+		t.Errorf("second block type = %v", content[1])
+	}
+}
+
+func TestTextToADF(t *testing.T) {
+	t.Run("empty yields single empty paragraph", func(t *testing.T) {
+		got := textToADF("")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		if got[0].(map[string]any)["type"] != "paragraph" {
+			t.Errorf("type = %v", got[0])
+		}
+	})
+
+	t.Run("single paragraph", func(t *testing.T) {
+		got := textToADF("hello world")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		p := got[0].(map[string]any)
+		if p["type"] != "paragraph" {
+			t.Errorf("type = %v", p["type"])
+		}
+		nodes := p["content"].([]any)
+		if len(nodes) != 1 || nodes[0].(map[string]any)["text"] != "hello world" {
+			t.Errorf("nodes = %v", nodes)
+		}
+	})
+
+	t.Run("two blocks separated by blank line", func(t *testing.T) {
+		got := textToADF("first\n\nsecond")
+		if len(got) != 2 {
+			t.Fatalf("len = %d", len(got))
+		}
+		if got[0].(map[string]any)["type"] != "paragraph" || got[1].(map[string]any)["type"] != "paragraph" {
+			t.Errorf("got = %v", got)
+		}
+	})
+
+	t.Run("bullet block becomes bulletList", func(t *testing.T) {
+		got := textToADF("- one\n- two\n- three")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		list := got[0].(map[string]any)
+		if list["type"] != "bulletList" {
+			t.Errorf("type = %v", list["type"])
+		}
+		items := list["content"].([]any)
+		if len(items) != 3 {
+			t.Fatalf("items = %d", len(items))
+		}
+		first := items[0].(map[string]any)
+		if first["type"] != "listItem" {
+			t.Errorf("item type = %v", first["type"])
+		}
+		inner := first["content"].([]any)[0].(map[string]any)
+		if inner["type"] != "paragraph" {
+			t.Errorf("inner = %v", inner)
+		}
+		textNode := inner["content"].([]any)[0].(map[string]any)
+		if textNode["text"] != "one" {
+			t.Errorf("bullet text = %v", textNode)
+		}
+	})
+
+	t.Run("mixed paragraph and bullet list", func(t *testing.T) {
+		got := textToADF("Goal: do thing\n\n- a\n- b")
+		if len(got) != 2 {
+			t.Fatalf("len = %d", len(got))
+		}
+		if got[0].(map[string]any)["type"] != "paragraph" {
+			t.Errorf("first = %v", got[0])
+		}
+		if got[1].(map[string]any)["type"] != "bulletList" {
+			t.Errorf("second = %v", got[1])
+		}
+	})
+
+	t.Run("multi-line non-bullet block uses hardBreak", func(t *testing.T) {
+		got := textToADF("one\ntwo")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		p := got[0].(map[string]any)
+		nodes := p["content"].([]any)
+		if len(nodes) != 3 {
+			t.Fatalf("nodes = %v", nodes)
+		}
+		if nodes[0].(map[string]any)["text"] != "one" {
+			t.Errorf("n0 = %v", nodes[0])
+		}
+		if nodes[1].(map[string]any)["type"] != "hardBreak" {
+			t.Errorf("n1 = %v", nodes[1])
+		}
+		if nodes[2].(map[string]any)["text"] != "two" {
+			t.Errorf("n2 = %v", nodes[2])
+		}
+	})
+
+	t.Run("mixed non-bullet lines produce paragraph, not list", func(t *testing.T) {
+		got := textToADF("- bullet\nprose")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		if got[0].(map[string]any)["type"] != "paragraph" {
+			t.Errorf("type = %v", got[0])
+		}
+	})
+
+	t.Run("leading blank lines ignored", func(t *testing.T) {
+		got := textToADF("\n\nhello")
+		if len(got) != 1 {
+			t.Fatalf("len = %d", len(got))
+		}
+		if got[0].(map[string]any)["type"] != "paragraph" {
+			t.Errorf("type = %v", got[0])
+		}
+	})
 }
 
 func TestCreateSubtaskFails(t *testing.T) {

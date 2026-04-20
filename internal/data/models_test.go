@@ -25,9 +25,9 @@ func TestValidJiraKey(t *testing.T) {
 func TestPlanValidate(t *testing.T) {
 	good := Plan{
 		ParentJiraKey: "PROJ-1",
-		TaskList: []PlannedTask{
-			{ID: "t1", Title: "do the thing"},
-		},
+		Waves: []Wave{{Tasks: []PlannedTask{
+			{Title: "do the thing"},
+		}}},
 	}
 	if err := good.Validate(); err != nil {
 		t.Fatalf("good plan failed: %v", err)
@@ -39,17 +39,9 @@ func TestPlanValidate(t *testing.T) {
 		t.Error("expected error for invalid parent key")
 	}
 
-	missingID := Plan{
-		ParentJiraKey: "PROJ-1",
-		TaskList:      []PlannedTask{{Title: "x"}},
-	}
-	if err := missingID.Validate(); err == nil {
-		t.Error("expected error for missing task id")
-	}
-
 	missingTitle := Plan{
 		ParentJiraKey: "PROJ-1",
-		TaskList:      []PlannedTask{{ID: "t1"}},
+		Waves:         []Wave{{Tasks: []PlannedTask{{}}}},
 	}
 	if err := missingTitle.Validate(); err == nil {
 		t.Error("expected error for missing task title")

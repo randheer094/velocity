@@ -18,8 +18,7 @@ func TestAdvanceWavePastEnd(t *testing.T) {
 		ParentJiraKey: "ARCH-AW-PAST",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-AW-PAST-1"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-AW-PAST-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-AW-PAST-1"}}}},
 		ActiveWaveIdx: 1,
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
@@ -50,10 +49,7 @@ func TestOnDismissedAlreadyDoneSubtask(t *testing.T) {
 		ParentJiraKey: "ARCH-DC-DONE",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList: []data.PlannedTask{
-			{ID: "t1", Title: "a", JiraKey: "ARCH-DC-DONE-1"},
-		},
-		Waves: []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-DC-DONE-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "a", JiraKey: "ARCH-DC-DONE-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -87,8 +83,7 @@ func presaveFailedPlan(t *testing.T, key, repo string) {
 		ParentJiraKey: key,
 		Name:          "x",
 		RepoURL:       repo,
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := db.SavePlan(context.Background(), p); err != nil {
 		t.Fatal(err)

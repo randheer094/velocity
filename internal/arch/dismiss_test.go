@@ -22,8 +22,7 @@ func TestOnDismissedTerminalIgnored(t *testing.T) {
 		ParentJiraKey: "ARCH-TD",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-TD-1"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-TD-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-TD-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -43,13 +42,9 @@ func TestOnDismissedCascades(t *testing.T) {
 		ParentJiraKey: "ARCH-DC",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList: []data.PlannedTask{
-			{ID: "t1", Title: "x", JiraKey: "ARCH-DC-1"},
-			{ID: "t2", Title: "y", JiraKey: "ARCH-DC-2"},
-		},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-DC-1"}}},
-			{Tasks: []data.WaveRef{{ID: "t2", JiraKey: "ARCH-DC-2"}}},
+			{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-DC-1"}}},
+			{Tasks: []data.PlannedTask{{Title: "y", JiraKey: "ARCH-DC-2"}}},
 		},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {

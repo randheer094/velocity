@@ -82,13 +82,9 @@ func TestSavePlanAndGetPlan(t *testing.T) {
 		ParentJiraKey: "PROJ-1",
 		Name:          "test plan",
 		RepoURL:       "https://github.com/o/r.git",
-		TaskList: []data.PlannedTask{
-			{ID: "t1", Title: "first", Description: "do first", JiraKey: "PROJ-2"},
-			{ID: "t2", Title: "second", JiraKey: "PROJ-3"},
-		},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "PROJ-2"}}},
-			{Tasks: []data.WaveRef{{ID: "t2", JiraKey: "PROJ-3"}}},
+			{Tasks: []data.PlannedTask{{Title: "first", Description: "do first", JiraKey: "PROJ-2"}}},
+			{Tasks: []data.PlannedTask{{Title: "second", JiraKey: "PROJ-3"}}},
 		},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
@@ -101,7 +97,7 @@ func TestSavePlanAndGetPlan(t *testing.T) {
 	if got == nil || got.Name != "test plan" {
 		t.Errorf("got = %+v", got)
 	}
-	if len(got.TaskList) != 2 || len(got.Waves) != 2 {
+	if len(got.Waves) != 2 {
 		t.Errorf("plan structure off: %+v", got)
 	}
 
@@ -134,8 +130,7 @@ func TestMarkPlanDone(t *testing.T) {
 		ParentJiraKey: "PROJ-D",
 		Name:          "done",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -156,8 +151,7 @@ func TestMarkPlanFailedAndDismissed(t *testing.T) {
 		ParentJiraKey: "PROJ-F",
 		Name:          "f",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -185,10 +179,9 @@ func TestWipePlanChildren(t *testing.T) {
 		ParentJiraKey: "PROJ-W",
 		Name:          "w",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}, {ID: "t2", Title: "y"}},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "t1"}}},
-			{Tasks: []data.WaveRef{{ID: "t2"}}},
+			{Tasks: []data.PlannedTask{{Title: "x"}}},
+			{Tasks: []data.PlannedTask{{Title: "y"}}},
 		},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
@@ -198,9 +191,6 @@ func TestWipePlanChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := GetPlan(ctx, "PROJ-W")
-	if len(got.TaskList) != 0 {
-		t.Errorf("tasks not wiped: %+v", got.TaskList)
-	}
 	if len(got.Waves) != 0 {
 		t.Errorf("waves not wiped: %+v", got.Waves)
 	}
@@ -297,8 +287,7 @@ func TestSavePlanPreservesCreatedAtAndStatus(t *testing.T) {
 		ParentJiraKey: "PROJ-CR",
 		Name:          "preset",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 		CreatedAt:     earlier,
 		Status:        data.PlanDone,
 	}
@@ -321,8 +310,7 @@ func TestSavePlanIdempotent(t *testing.T) {
 		ParentJiraKey: "PROJ-I",
 		Name:          "first",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)

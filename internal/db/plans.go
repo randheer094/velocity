@@ -37,12 +37,6 @@ func GetPlan(ctx context.Context, parentKey string) (*data.Plan, error) {
 	}
 	plan.Status = data.PlanStatus(statusStr)
 
-	tasks, err := loadPlanTasks(ctx, p, parentKey)
-	if err != nil {
-		return nil, err
-	}
-	plan.TaskList = tasks
-
 	waves, err := loadPlanWaves(ctx, p, parentKey)
 	if err != nil {
 		return nil, err
@@ -52,7 +46,7 @@ func GetPlan(ctx context.Context, parentKey string) (*data.Plan, error) {
 	return &plan, nil
 }
 
-// SavePlan rebuilds plan_task_deps from the wave structure: task in wave N depends on every task in wave N-1.
+// SavePlan upserts the plans row and rewrites plan_waves from the in-memory Plan.
 func SavePlan(ctx context.Context, plan *data.Plan) error {
 	p := Shared()
 	if p == nil {
@@ -94,46 +88,16 @@ func SavePlan(ctx context.Context, plan *data.Plan) error {
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM plan_tasks WHERE parent_jira_key = $1`, plan.ParentJiraKey); err != nil {
-		return err
-	}
-	for i, t := range plan.TaskList {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO plan_tasks (parent_jira_key, task_id, position, title, description, jira_key)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, plan.ParentJiraKey, t.ID, i, t.Title, t.Description, t.JiraKey); err != nil {
-			return err
-		}
-	}
-
 	if _, err := tx.Exec(ctx, `DELETE FROM plan_waves WHERE parent_jira_key = $1`, plan.ParentJiraKey); err != nil {
 		return err
 	}
 	for waveIdx, w := range plan.Waves {
-		for pos, ref := range w.Tasks {
+		for pos, t := range w.Tasks {
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO plan_waves (parent_jira_key, wave_idx, position, task_id, jira_key)
-				VALUES ($1, $2, $3, $4, $5)
-			`, plan.ParentJiraKey, waveIdx, pos, ref.ID, ref.JiraKey); err != nil {
+				INSERT INTO plan_waves (parent_jira_key, wave_idx, position, title, description, jira_key)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, plan.ParentJiraKey, waveIdx, pos, t.Title, t.Description, t.JiraKey); err != nil {
 				return err
-			}
-		}
-	}
-
-	if _, err := tx.Exec(ctx, `DELETE FROM plan_task_deps WHERE parent_jira_key = $1`, plan.ParentJiraKey); err != nil {
-		return err
-	}
-	for waveIdx := 1; waveIdx < len(plan.Waves); waveIdx++ {
-		prev := plan.Waves[waveIdx-1].Tasks
-		for _, ref := range plan.Waves[waveIdx].Tasks {
-			for _, dep := range prev {
-				if _, err := tx.Exec(ctx, `
-					INSERT INTO plan_task_deps (parent_jira_key, task_id, depends_on_task_id)
-					VALUES ($1, $2, $3)
-					ON CONFLICT DO NOTHING
-				`, plan.ParentJiraKey, ref.ID, dep.ID); err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -185,68 +149,43 @@ func MarkPlanDismissed(ctx context.Context, parentKey, jiraStatus string) error 
 	return err
 }
 
-// WipePlanChildren clears tasks/waves/deps for a retry; the plans row stays (SavePlan overwrites it).
+// WipePlanChildren clears waves for a retry; the plans row stays (SavePlan overwrites it).
 func WipePlanChildren(ctx context.Context, parentKey string) error {
 	p := Shared()
 	if p == nil {
 		return ErrNotStarted
 	}
-	tx, err := p.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	for _, q := range []string{
-		`DELETE FROM plan_task_deps WHERE parent_jira_key = $1`,
-		`DELETE FROM plan_waves WHERE parent_jira_key = $1`,
-		`DELETE FROM plan_tasks WHERE parent_jira_key = $1`,
-	} {
-		if _, err := tx.Exec(ctx, q, parentKey); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
+	_, err := p.Exec(ctx, `DELETE FROM plan_waves WHERE parent_jira_key = $1`, parentKey)
+	return err
 }
 
+// TaskPredecessors returns jira_keys of every task in the wave immediately
+// preceding the wave that contains jiraKey. Empty if jiraKey is in wave 0
+// or not part of any plan.
 func TaskPredecessors(ctx context.Context, jiraKey string) ([]string, error) {
-	p := Shared()
-	if p == nil {
-		return nil, ErrNotStarted
-	}
-	rows, err := p.Query(ctx, `
-		SELECT dep.jira_key
-		FROM plan_task_deps d
-		JOIN plan_tasks self
-		  ON self.parent_jira_key = d.parent_jira_key
-		 AND self.task_id = d.task_id
-		JOIN plan_tasks dep
-		  ON dep.parent_jira_key = d.parent_jira_key
-		 AND dep.task_id = d.depends_on_task_id
-		WHERE self.jira_key = $1
-	`, jiraKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanStringColumn(rows)
+	return neighboringWaveKeys(ctx, jiraKey, -1)
 }
 
+// TaskSuccessors returns jira_keys of every task in the wave immediately
+// following the wave that contains jiraKey. Empty if jiraKey is in the
+// last wave or not part of any plan.
 func TaskSuccessors(ctx context.Context, jiraKey string) ([]string, error) {
+	return neighboringWaveKeys(ctx, jiraKey, +1)
+}
+
+func neighboringWaveKeys(ctx context.Context, jiraKey string, delta int) ([]string, error) {
 	p := Shared()
 	if p == nil {
 		return nil, ErrNotStarted
 	}
 	rows, err := p.Query(ctx, `
-		SELECT succ.jira_key
-		FROM plan_task_deps d
-		JOIN plan_tasks self
-		  ON self.parent_jira_key = d.parent_jira_key
-		 AND self.task_id = d.depends_on_task_id
-		JOIN plan_tasks succ
-		  ON succ.parent_jira_key = d.parent_jira_key
-		 AND succ.task_id = d.task_id
+		SELECT neighbor.jira_key
+		FROM plan_waves self
+		JOIN plan_waves neighbor
+		  ON neighbor.parent_jira_key = self.parent_jira_key
+		 AND neighbor.wave_idx = self.wave_idx + $2
 		WHERE self.jira_key = $1
-	`, jiraKey)
+	`, jiraKey, delta)
 	if err != nil {
 		return nil, err
 	}
@@ -268,31 +207,9 @@ func scanStringColumn(rows pgx.Rows) ([]string, error) {
 	return out, rows.Err()
 }
 
-func loadPlanTasks(ctx context.Context, p *pgxpool.Pool, parentKey string) ([]data.PlannedTask, error) {
-	rows, err := p.Query(ctx, `
-		SELECT task_id, title, description, jira_key
-		FROM plan_tasks
-		WHERE parent_jira_key = $1
-		ORDER BY position ASC
-	`, parentKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []data.PlannedTask
-	for rows.Next() {
-		var t data.PlannedTask
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.JiraKey); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
 func loadPlanWaves(ctx context.Context, p *pgxpool.Pool, parentKey string) ([]data.Wave, error) {
 	rows, err := p.Query(ctx, `
-		SELECT wave_idx, task_id, jira_key
+		SELECT wave_idx, title, description, jira_key
 		FROM plan_waves
 		WHERE parent_jira_key = $1
 		ORDER BY wave_idx ASC, position ASC
@@ -305,14 +222,14 @@ func loadPlanWaves(ctx context.Context, p *pgxpool.Pool, parentKey string) ([]da
 	var waves []data.Wave
 	for rows.Next() {
 		var waveIdx int
-		var ref data.WaveRef
-		if err := rows.Scan(&waveIdx, &ref.ID, &ref.JiraKey); err != nil {
+		var t data.PlannedTask
+		if err := rows.Scan(&waveIdx, &t.Title, &t.Description, &t.JiraKey); err != nil {
 			return nil, err
 		}
 		for len(waves) <= waveIdx {
 			waves = append(waves, data.Wave{})
 		}
-		waves[waveIdx].Tasks = append(waves[waveIdx].Tasks, ref)
+		waves[waveIdx].Tasks = append(waves[waveIdx].Tasks, t)
 	}
 	return waves, rows.Err()
 }

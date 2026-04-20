@@ -391,9 +391,8 @@ Branches are named **exactly** after the sub-task Jira key (e.g.
 
 ## Dependency tracking
 
-Every time a plan is saved, velocity derives a dependency table
-from the wave structure (`plan_task_deps`). For any sub-task you
-can query:
+Every plan persists its waves in order. For any sub-task you can
+query its neighbouring waves:
 
 - **predecessors** — tickets that must be DONE before this one can
   start.

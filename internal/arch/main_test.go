@@ -109,11 +109,11 @@ case "${ARCH_TEST_MODE:-}" in
     exit 0
     ;;
   empty-tasks)
-    echo '<<<PLAN_BEGIN>>>{"task_list":[],"waves":[{"tasks":[{"id":"t"}]}]}<<<PLAN_END>>>'
+    echo '<<<PLAN_BEGIN>>>{"waves":[{"tasks":[]}]}<<<PLAN_END>>>'
     exit 0
     ;;
   empty-waves)
-    echo '<<<PLAN_BEGIN>>>{"task_list":[{"id":"t","title":"x"}],"waves":[]}<<<PLAN_END>>>'
+    echo '<<<PLAN_BEGIN>>>{"waves":[]}<<<PLAN_END>>>'
     exit 0
     ;;
 esac
@@ -121,7 +121,7 @@ case "$last" in
   *PLAN_BEGIN*)
     cat <<EOF
 <<<PLAN_BEGIN>>>
-{"task_list":[{"id":"t1","title":"first"},{"id":"t2","title":"second"}],"waves":[{"tasks":[{"id":"t1"}]},{"tasks":[{"id":"t2"}]}]}
+{"waves":[{"tasks":[{"title":"first"}]},{"tasks":[{"title":"second"}]}]}
 <<<PLAN_END>>>
 EOF
     ;;

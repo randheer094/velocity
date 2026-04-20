@@ -12,29 +12,29 @@ import (
 func TestExtractPlanWithMarkers(t *testing.T) {
 	raw := `prelude
 <<<PLAN_BEGIN>>>
-{"task_list":[{"id":"t1","title":"a"}],"waves":[{"tasks":[{"id":"t1"}]}]}
+{"waves":[{"tasks":[{"title":"a","description":"d"}]}]}
 <<<PLAN_END>>>
 trailing`
 	p, err := extractPlan(raw)
 	if err != nil {
 		t.Fatalf("extractPlan: %v", err)
 	}
-	if len(p.TaskList) != 1 || p.TaskList[0].ID != "t1" {
-		t.Errorf("task list: %+v", p)
+	if len(p.Waves) != 1 || len(p.Waves[0].Tasks) != 1 {
+		t.Fatalf("waves: %+v", p)
 	}
-	if len(p.Waves) != 1 {
-		t.Errorf("waves: %+v", p)
+	if p.Waves[0].Tasks[0].Title != "a" {
+		t.Errorf("title: %+v", p.Waves[0].Tasks[0])
 	}
 }
 
 func TestExtractPlanFallbackJSON(t *testing.T) {
-	raw := `some chatter {"task_list":[{"id":"t1","title":"a"}],"waves":[{"tasks":[{"id":"t1"}]}]} end`
+	raw := `some chatter {"waves":[{"tasks":[{"title":"a"}]}]} end`
 	p, err := extractPlan(raw)
 	if err != nil {
 		t.Fatalf("extractPlan: %v", err)
 	}
-	if len(p.TaskList) != 1 {
-		t.Errorf("task list: %+v", p)
+	if len(p.Waves) != 1 || len(p.Waves[0].Tasks) != 1 {
+		t.Errorf("waves: %+v", p)
 	}
 }
 
@@ -74,10 +74,10 @@ func TestTrunc(t *testing.T) {
 }
 
 func TestKeysOf(t *testing.T) {
-	w := data.Wave{Tasks: []data.WaveRef{
-		{ID: "a", JiraKey: "PROJ-1"},
-		{ID: "b"},
-		{ID: "c", JiraKey: "PROJ-2"},
+	w := data.Wave{Tasks: []data.PlannedTask{
+		{Title: "a", JiraKey: "PROJ-1"},
+		{Title: "b"},
+		{Title: "c", JiraKey: "PROJ-2"},
 	}}
 	got := keysOf(w)
 	want := []string{"PROJ-1", "PROJ-2"}
@@ -183,6 +183,17 @@ func TestBuildArchPrompt(t *testing.T) {
 	}
 	if !strings.Contains(got, planBegin) || !strings.Contains(got, planEnd) {
 		t.Errorf("prompt missing markers")
+	}
+	for _, section := range []string{
+		"Files to change:",
+		"Acceptance criteria:",
+		"Out of scope:",
+		"Wave rules",
+		"File disjointness",
+	} {
+		if !strings.Contains(got, section) {
+			t.Errorf("prompt missing section %q", section)
+		}
 	}
 }
 

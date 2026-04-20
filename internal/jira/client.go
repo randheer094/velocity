@@ -309,14 +309,7 @@ func (c *Client) CreateSubtask(projectKey, summary, description, parentKey strin
 			"description": map[string]any{
 				"type":    "doc",
 				"version": 1,
-				"content": []any{
-					map[string]any{
-						"type": "paragraph",
-						"content": []any{
-							map[string]any{"type": "text", "text": description},
-						},
-					},
-				},
+				"content": textToADF(description),
 			},
 		},
 	}
@@ -368,6 +361,79 @@ func (c *Client) ListSubtasks(parentKey string) []string {
 		}
 	}
 	return out
+}
+
+// textToADF converts a plain-text description into an ADF content array.
+// Blank lines separate blocks. A block whose non-empty lines all start
+// with "- " becomes a bulletList; otherwise it becomes a paragraph with
+// hardBreak nodes between source lines. An empty input yields a single
+// empty paragraph so Jira always receives a valid doc.
+func textToADF(text string) []any {
+	blocks := splitADFBlocks(text)
+	if len(blocks) == 0 {
+		return []any{map[string]any{"type": "paragraph"}}
+	}
+	out := make([]any, 0, len(blocks))
+	for _, block := range blocks {
+		out = append(out, renderADFBlock(block))
+	}
+	return out
+}
+
+func splitADFBlocks(text string) [][]string {
+	var blocks [][]string
+	var current []string
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimRight(raw, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			if len(current) > 0 {
+				blocks = append(blocks, current)
+				current = nil
+			}
+			continue
+		}
+		current = append(current, line)
+	}
+	if len(current) > 0 {
+		blocks = append(blocks, current)
+	}
+	return blocks
+}
+
+func renderADFBlock(lines []string) map[string]any {
+	if isBulletBlock(lines) {
+		items := make([]any, 0, len(lines))
+		for _, line := range lines {
+			body := strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(line, " \t"), "-"))
+			items = append(items, map[string]any{
+				"type": "listItem",
+				"content": []any{
+					map[string]any{
+						"type":    "paragraph",
+						"content": []any{map[string]any{"type": "text", "text": body}},
+					},
+				},
+			})
+		}
+		return map[string]any{"type": "bulletList", "content": items}
+	}
+	nodes := make([]any, 0, len(lines)*2)
+	for i, line := range lines {
+		if i > 0 {
+			nodes = append(nodes, map[string]any{"type": "hardBreak"})
+		}
+		nodes = append(nodes, map[string]any{"type": "text", "text": line})
+	}
+	return map[string]any{"type": "paragraph", "content": nodes}
+}
+
+func isBulletBlock(lines []string) bool {
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimLeft(line, " \t"), "- ") {
+			return false
+		}
+	}
+	return len(lines) > 0
 }
 
 // FlattenADF returns the concatenated text of an ADF node.

@@ -289,8 +289,7 @@ func TestPoolOpsCanceledContext(t *testing.T) {
 		ParentJiraKey: "CANCELED",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := SavePlan(ctx, plan); err == nil {
 		t.Error("SavePlan: expected error")
@@ -347,34 +346,28 @@ func TestApplyMigrationCanceled(t *testing.T) {
 	}
 }
 
-// TestLoadPlanErrorsPropagate exercises loadPlanTasks/loadPlanWaves when
-// the outer context is canceled mid-load. We need the outer QueryRow to
-// succeed but subsequent Query to fail. Simulate by saving a plan, then
-// calling loadPlanTasks / loadPlanWaves directly with a canceled ctx.
-func TestLoadPlanTasksWavesCanceled(t *testing.T) {
+// TestLoadPlanWavesCanceled exercises loadPlanWaves when the outer
+// context is canceled mid-load. Save a plan, then call loadPlanWaves
+// directly with a canceled ctx.
+func TestLoadPlanWavesCanceled(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "LOAD-CANCEL",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := loadPlanTasks(canceledCtx(), Shared(), "LOAD-CANCEL"); err == nil {
-		t.Error("loadPlanTasks: expected error")
 	}
 	if _, err := loadPlanWaves(canceledCtx(), Shared(), "LOAD-CANCEL"); err == nil {
 		t.Error("loadPlanWaves: expected error")
 	}
 }
 
-// TestSavePlanExistingRowBranches exercises SavePlan's multi-wave path:
-// two waves so the wave-index loop, plan_waves insert, and plan_task_deps
-// insert all execute.
+// TestSavePlanTwoWaves exercises SavePlan's multi-wave path: two
+// waves so the wave-index loop and per-wave insert both execute.
 func TestSavePlanTwoWaves(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
@@ -382,13 +375,9 @@ func TestSavePlanTwoWaves(t *testing.T) {
 		ParentJiraKey: "SAVE-TWO",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList: []data.PlannedTask{
-			{ID: "a", Title: "A"},
-			{ID: "b", Title: "B"},
-		},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "a"}}},
-			{Tasks: []data.WaveRef{{ID: "b"}}},
+			{Tasks: []data.PlannedTask{{Title: "A"}}},
+			{Tasks: []data.PlannedTask{{Title: "B"}}},
 		},
 	}
 	if err := SavePlan(ctx, p); err != nil {

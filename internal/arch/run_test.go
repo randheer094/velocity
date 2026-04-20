@@ -67,8 +67,7 @@ func TestRunCloneFailureRecordsFailure(t *testing.T) {
 		ParentJiraKey: "ARCH-RUN-FAIL",
 		Name:          "x",
 		RepoURL:       "/nonexistent/repo.git",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -92,8 +91,7 @@ func TestRunRetryGuardTerminalIgnored(t *testing.T) {
 		ParentJiraKey: "ARCH-RUN-DONE",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -122,13 +120,20 @@ func TestRunFullPlanSucceeds(t *testing.T) {
 	if got.Status != data.PlanCoding {
 		t.Errorf("status = %q", got.Status)
 	}
-	if len(got.TaskList) != 2 || len(got.Waves) != 2 {
-		t.Errorf("structure: %+v", got)
+	if len(got.Waves) != 2 {
+		t.Errorf("waves: %+v", got)
 	}
-	for _, task := range got.TaskList {
-		if task.JiraKey == "" {
-			t.Errorf("task %q missing JiraKey", task.ID)
+	totalTasks := 0
+	for _, w := range got.Waves {
+		for _, task := range w.Tasks {
+			totalTasks++
+			if task.JiraKey == "" {
+				t.Errorf("task %q missing JiraKey", task.Title)
+			}
 		}
+	}
+	if totalTasks != 2 {
+		t.Errorf("total tasks: %d", totalTasks)
 	}
 }
 
@@ -139,8 +144,7 @@ func TestRunRetryGuardActiveAdvances(t *testing.T) {
 		ParentJiraKey: "ARCH-RUN-ACT",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-RUN-ACT-1"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-RUN-ACT-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-RUN-ACT-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)

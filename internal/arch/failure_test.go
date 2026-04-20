@@ -16,8 +16,7 @@ func TestRecordFailureFull(t *testing.T) {
 		ParentJiraKey: "ARCH-RF",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)

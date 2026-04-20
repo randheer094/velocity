@@ -128,18 +128,21 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	if err != nil {
 		return fmt.Errorf("parse plan: %w; raw=%s", err, trunc(output, 400))
 	}
-	if len(parsed.TaskList) == 0 {
-		return errors.New("arch returned empty task_list")
-	}
 	if len(parsed.Waves) == 0 {
 		return errors.New("arch returned empty waves")
+	}
+	totalTasks := 0
+	for _, w := range parsed.Waves {
+		totalTasks += len(w.Tasks)
+	}
+	if totalTasks == 0 {
+		return errors.New("arch returned waves with no tasks")
 	}
 
 	p := &data.Plan{
 		ParentJiraKey: parentKey,
 		Name:          title,
 		RepoURL:       repoURL,
-		TaskList:      parsed.TaskList,
 		Waves:         parsed.Waves,
 		ActiveWaveIdx: 0,
 		Status:        data.PlanCoding,
@@ -152,29 +155,22 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	if projectKey == "" {
 		return fmt.Errorf("cannot derive project key from %q", parentKey)
 	}
-	keyByID := map[string]string{}
-	for i, t := range p.TaskList {
-		if t.JiraKey != "" {
-			keyByID[t.ID] = t.JiraKey
-			continue
-		}
-		description := t.Description
-		if description == "" {
-			description = t.Title
-		}
-		key := client.CreateSubtask(projectKey, t.Title, description, parentKey)
-		if key == "" {
-			return fmt.Errorf("failed to create sub-task for %q", t.ID)
-		}
-		p.TaskList[i].JiraKey = key
-		keyByID[t.ID] = key
-		slog.Info("arch: created subtask", "parent", parentKey, "id", t.ID, "jira", key)
-	}
-	for i, w := range p.Waves {
-		for j, ref := range w.Tasks {
-			if ref.JiraKey == "" {
-				p.Waves[i].Tasks[j].JiraKey = keyByID[ref.ID]
+	for waveIdx := range p.Waves {
+		for taskIdx := range p.Waves[waveIdx].Tasks {
+			t := &p.Waves[waveIdx].Tasks[taskIdx]
+			if t.JiraKey != "" {
+				continue
 			}
+			description := t.Description
+			if description == "" {
+				description = t.Title
+			}
+			key := client.CreateSubtask(projectKey, t.Title, description, parentKey)
+			if key == "" {
+				return fmt.Errorf("failed to create sub-task %q (wave %d, idx %d)", t.Title, waveIdx, taskIdx)
+			}
+			t.JiraKey = key
+			slog.Info("arch: created subtask", "parent", parentKey, "title", t.Title, "jira", key)
 		}
 	}
 
@@ -245,10 +241,10 @@ func assignWave(_ context.Context, p *data.Plan, idx int) error {
 	if idx < 0 || idx >= len(p.Waves) {
 		return fmt.Errorf("wave idx %d out of range", idx)
 	}
-	for _, ref := range p.Waves[idx].Tasks {
-		key := ref.JiraKey
+	for _, t := range p.Waves[idx].Tasks {
+		key := t.JiraKey
 		if key == "" {
-			slog.Warn("arch: wave ref missing jira key", "ref", ref.ID, "parent", p.ParentJiraKey)
+			slog.Warn("arch: wave task missing jira key", "title", t.Title, "parent", p.ParentJiraKey)
 			continue
 		}
 		if !client.Assign(key, cfg.Jira.DeveloperJiraID) {
@@ -270,9 +266,11 @@ func archiveDone(ctx context.Context, client *jira.Client, p *data.Plan) error {
 		slog.Warn("arch: failed to mark plan done", "key", p.ParentJiraKey, "err", err)
 	}
 	_ = os.RemoveAll(config.WorkspacePath(p.ParentJiraKey))
-	for _, t := range p.TaskList {
-		if t.JiraKey != "" {
-			_ = os.RemoveAll(config.WorkspacePath(t.JiraKey))
+	for _, w := range p.Waves {
+		for _, t := range w.Tasks {
+			if t.JiraKey != "" {
+				_ = os.RemoveAll(config.WorkspacePath(t.JiraKey))
+			}
 		}
 	}
 	slog.Info("arch: parent done, plan archived (DB retained)", "key", p.ParentJiraKey)
@@ -306,8 +304,7 @@ func allDone(issues map[string]status.IssueInfo, keys []string) bool {
 }
 
 type rawPlan struct {
-	TaskList []data.PlannedTask `json:"task_list"`
-	Waves    []data.Wave        `json:"waves"`
+	Waves []data.Wave `json:"waves"`
 }
 
 // extractPlan accepts the tagged block (preferred) or the last

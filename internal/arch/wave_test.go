@@ -22,8 +22,7 @@ func TestAdvanceWaveStillInProgress(t *testing.T) {
 		ParentJiraKey: "ARCH-AW-1",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-AW-1-1"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-AW-1-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-AW-1-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -41,13 +40,9 @@ func TestAdvanceWaveAdvances(t *testing.T) {
 		ParentJiraKey: "ARCH-AW-2",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList: []data.PlannedTask{
-			{ID: "t1", Title: "x", JiraKey: "ARCH-AW-2-1"},
-			{ID: "t2", Title: "y", JiraKey: "ARCH-AW-2-2"},
-		},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-AW-2-1"}}},
-			{Tasks: []data.WaveRef{{ID: "t2", JiraKey: "ARCH-AW-2-2"}}},
+			{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-AW-2-1"}}},
+			{Tasks: []data.PlannedTask{{Title: "y", JiraKey: "ARCH-AW-2-2"}}},
 		},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
@@ -70,8 +65,7 @@ func TestAdvanceWaveCompletes(t *testing.T) {
 		ParentJiraKey: "ARCH-AW-3",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-AW-3-1"}},
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-AW-3-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-AW-3-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
@@ -99,9 +93,8 @@ func TestAssignWaveOutOfRange(t *testing.T) {
 func TestAssignWaveSkipsBlankKey(t *testing.T) {
 	plan := &data.Plan{
 		ParentJiraKey: "ARCH-AS-2",
-		Waves:         []data.Wave{{Tasks: []data.WaveRef{{ID: "t-x"}}}}, // no JiraKey
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "t-x"}}}}, // no JiraKey
 	}
-	// Should skip the blank-key ref without erroring.
 	if err := assignWave(context.Background(), plan, 0); err != nil {
 		t.Errorf("assignWave: %v", err)
 	}
@@ -110,16 +103,13 @@ func TestAssignWaveSkipsBlankKey(t *testing.T) {
 func TestAdvanceWaveSkipsEmpty(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
-	// First wave empty (no jira keys) — AdvanceWave should auto-skip and
-	// recurse to next wave, then complete the plan.
 	plan := &data.Plan{
 		ParentJiraKey: "ARCH-AW-4",
 		Name:          "x",
 		RepoURL:       "r",
-		TaskList:      []data.PlannedTask{{ID: "t1", Title: "x", JiraKey: "ARCH-AW-4-1"}},
 		Waves: []data.Wave{
-			{Tasks: []data.WaveRef{{ID: "t-skip"}}}, // no JiraKey
-			{Tasks: []data.WaveRef{{ID: "t1", JiraKey: "ARCH-AW-4-1"}}},
+			{Tasks: []data.PlannedTask{{Title: "t-skip"}}}, // no JiraKey
+			{Tasks: []data.PlannedTask{{Title: "x", JiraKey: "ARCH-AW-4-1"}}},
 		},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {

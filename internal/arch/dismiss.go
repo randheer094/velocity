@@ -34,10 +34,12 @@ func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 	client := jira.Shared()
 	dismissedName := status.SubtaskDismissJiraName()
 	if client != nil && dismissedName != "" {
-		subKeys := make([]string, 0, len(p.TaskList))
-		for _, t := range p.TaskList {
-			if t.JiraKey != "" {
-				subKeys = append(subKeys, t.JiraKey)
+		var subKeys []string
+		for _, w := range p.Waves {
+			for _, t := range w.Tasks {
+				if t.JiraKey != "" {
+					subKeys = append(subKeys, t.JiraKey)
+				}
 			}
 		}
 		infos := client.GetTasksStatus(subKeys)
