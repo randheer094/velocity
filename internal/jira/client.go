@@ -345,18 +345,24 @@ func (c *Client) CommentIssue(issueKey, body string) bool {
 // CommentIssueCode posts body inside an ADF codeBlock so monospace
 // content (e.g. ASCII diagrams) keeps its alignment when rendered.
 func (c *Client) CommentIssueCode(issueKey, body string) bool {
+	return c.CommentIssueADF(issueKey, []any{
+		map[string]any{
+			"type": "codeBlock",
+			"content": []any{
+				map[string]any{"type": "text", "text": body},
+			},
+		},
+	})
+}
+
+// CommentIssueADF posts a comment whose body content is the caller-supplied
+// ADF node slice. The doc/version envelope is applied here.
+func (c *Client) CommentIssueADF(issueKey string, content []any) bool {
 	payload := map[string]any{
 		"body": map[string]any{
 			"type":    "doc",
 			"version": 1,
-			"content": []any{
-				map[string]any{
-					"type": "codeBlock",
-					"content": []any{
-						map[string]any{"type": "text", "text": body},
-					},
-				},
-			},
+			"content": content,
 		},
 	}
 	raw := c.post("issue/"+issueKey+"/comment", payload)
