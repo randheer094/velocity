@@ -174,9 +174,9 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		}
 	}
 
-	if diagram := renderWavesASCII(p.Waves); diagram != "" {
-		if !client.CommentIssueCode(parentKey, diagram) {
-			slog.Warn("arch: failed to post plan diagram comment", "key", parentKey)
+	if content := buildWavesComment(p.Waves); len(content) > 0 {
+		if !client.CommentIssueADF(parentKey, content) {
+			slog.Warn("arch: failed to post plan comment", "key", parentKey)
 		}
 	}
 

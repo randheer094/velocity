@@ -429,6 +429,57 @@ func TestCommentIssueCodeBadPost(t *testing.T) {
 	}
 }
 
+func TestCommentIssueADF(t *testing.T) {
+	var seen map[string]any
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&seen)
+		w.Write([]byte(`{}`))
+	})
+	nodes := []any{
+		map[string]any{
+			"type": "orderedList",
+			"content": []any{
+				map[string]any{
+					"type": "listItem",
+					"content": []any{
+						map[string]any{
+							"type":    "paragraph",
+							"content": []any{map[string]any{"type": "text", "text": "Wave 1"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	if !c.CommentIssueADF("X-1", nodes) {
+		t.Fatal("expected true")
+	}
+	body, _ := seen["body"].(map[string]any)
+	if body["type"] != "doc" {
+		t.Errorf("body type = %v, want doc", body["type"])
+	}
+	if v, _ := body["version"].(float64); v != 1 {
+		t.Errorf("body version = %v, want 1", body["version"])
+	}
+	content, _ := body["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("content len = %d, want 1", len(content))
+	}
+	node, _ := content[0].(map[string]any)
+	if node["type"] != "orderedList" {
+		t.Errorf("content[0].type = %v, want orderedList", node["type"])
+	}
+}
+
+func TestCommentIssueADFBadPost(t *testing.T) {
+	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not json"))
+	})
+	if c.CommentIssueADF("X-1", []any{}) {
+		t.Error("expected false on bad JSON post")
+	}
+}
+
 func TestListSubtasks(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"fields":{"subtasks":[{"key":"S-1"},{"key":"S-2"},{"key":""}]}}`))
