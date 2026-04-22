@@ -21,7 +21,9 @@ Every screen / feature uses MVI.
 - I/O (network, DB, platform) lives in a use-case / processor
   layer invoked from the ViewModel.
 - Views render `State` and forward user input as `Intent`.
-- Every `State` field survives process death via `SavedStateHandle`.
+- `SavedStateHandle` carries only the fields needed to reload the
+  screen after process death (e.g. the `id` on a details page);
+  derived or fetched data is re-loaded on restart.
 
 ### UI: Jetpack Compose
 
