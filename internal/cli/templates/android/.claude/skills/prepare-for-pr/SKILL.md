@@ -1,6 +1,6 @@
 ---
 name: prepare-for-pr
-description: Run before opening a pull request on this Android project. Uses the agent-focused `android` CLI to boot devices and manage the SDK, runs the mandatory unit + E2E (connectedAndroidTest) suites, enforces MVI + Hilt conventions, and runs detekt / lint / ktlint where configured so the PR description writes itself.
+description: Run before opening a pull request on this Android project. Uses the agent-focused `android` CLI to boot devices and manage the SDK, runs the mandatory unit + E2E (connectedAndroidTest) suites, and runs lint / detekt / ktlint where configured so the PR description writes itself.
 ---
 
 # Prepare for PR (Android)
@@ -8,15 +8,10 @@ description: Run before opening a pull request on this Android project. Uses the
 Run these gates in order before opening a pull request. Stop at the
 first failure and fix it — do not open a PR with any step red.
 
-**Non-negotiables for this project**
-
-- **Architecture.** MVI (State / Intent / Effect / pure reducer) and
-  Hilt for DI. See `CLAUDE.md` for the full rules.
-- **Tests.** Both **unit tests** (`./gradlew test`) and **E2E /
-  instrumented tests** (`./gradlew connectedAndroidTest`) are
-  mandatory for every PR. Any new feature or reducer branch ships
-  with a unit test; any new Composable, navigation edge, DI binding,
-  or platform interaction ships with an instrumented test.
+**Project conventions** (MVI, Hilt, testing, layout) live in
+[`.claude/rules/conventions.md`](../../rules/conventions.md). The
+gates below assume the code you're shipping already follows them;
+if it doesn't, fix it before running the gates.
 
 ## Android CLI (agent-focused wrapper)
 
@@ -91,50 +86,32 @@ adb emu kill
 
 1. **Analyze.** `android analyze` — confirms the agent's view of the
    module graph matches Gradle. Fix any mismatch before continuing.
-2. **Architecture review.** For every file this change touches or
-   adds, confirm:
-   - **MVI.** UI state lives on an immutable `State`. User input
-     dispatches an `Intent`. One-shot side effects (nav, snackbars,
-     toasts) are emitted as `Effect`s. State transitions happen in
-     a pure `reduce(state, intent) -> state` — no I/O inside
-     `reduce`.
-   - **Hilt.** Every collaborator reaches the class via constructor
-     injection (`@Inject constructor(...)`) or Hilt scope
-     (`@HiltViewModel`, `@AndroidEntryPoint`). No manual `object
-     ServiceLocator`, no singleton fields set from `Application`,
-     no `lateinit` holders populated by hand. New bindings use
-     `@Module @InstallIn(...)` with the smallest scope that works.
-   If anything is off, fix before running the later gates.
-3. **Build.** `./gradlew assembleDebug` must succeed for every
+2. **Build.** `./gradlew assembleDebug` must succeed for every
    module touched by this change.
-4. **Unit tests (mandatory).** `./gradlew test` must exit 0. Every
+3. **Unit tests (mandatory).** `./gradlew test` must exit 0. Every
    new reducer branch / use-case / mapper ships with at least one
-   JVM unit test. If the change touches shared code, run the full
-   suite — not just one module. Exit with a failure if the diff
-   adds logic without a matching test.
-5. **Android lint.** `./gradlew lint` must exit 0. Treat new
+   JVM unit test (see `conventions.md` §Testing). If the change
+   touches shared code, run the full suite — not just one module.
+4. **Android lint.** `./gradlew lint` must exit 0. Treat new
    warnings as failures unless they're explicitly baselined.
-6. **Style / static analysis.** Run whichever of these the project
+5. **Style / static analysis.** Run whichever of these the project
    configures; skip the ones that aren't wired up:
    - `./gradlew ktlintCheck`
    - `./gradlew detekt`
    - `./gradlew spotlessCheck`
-7. **E2E / instrumented tests (mandatory).** Boot an AVD via the
+6. **E2E / instrumented tests (mandatory).** Boot an AVD via the
    sequence above and run `./gradlew connectedAndroidTest`. Every
    new Composable / screen / navigation edge / DI binding ships
-   with at least one instrumented test (`@HiltAndroidTest` +
-   Compose UI test or Espresso). A PR that skips this gate must
-   explain in the body why E2E coverage is impossible for the
-   change.
-8. **Diff review.** Read `git diff origin/main...HEAD`:
+   with at least one instrumented test (see `conventions.md`
+   §Testing). A PR that skips this gate must explain in the body
+   why E2E coverage is impossible for the change.
+7. **Diff review.** Read `git diff origin/main...HEAD`:
    - Any `Log.d`, `println`, or debug-only code left in?
    - Any hard-coded user-visible strings that should live in
      `strings.xml`?
    - Any new permission added to `AndroidManifest.xml`? Justify it.
    - Any new dependency in `build.gradle(.kts)`? Justify it.
-   - Any new class that looks like a service locator or that sets
-     a singleton outside Hilt? Replace it with a Hilt binding.
-9. **PR draft.** Produce:
+8. **PR draft.** Produce:
    - **Title.** Imperative mood, under 70 characters.
    - **Body.** What changed, why, and how to verify. Include
      screenshots or a recording for any user-visible UI change.

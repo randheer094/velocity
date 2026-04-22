@@ -1,24 +1,24 @@
 # Project
 
-Short description of what this module does and why it exists.
+Short description of what this Go module does and why it exists.
 
 ## Build, test, run
 
 - `go build ./...` — compile every package.
 - `go test ./...` — run the unit test suite.
+- `go test -race ./...` — race detector; must pass in CI.
 - `go vet ./...` — static analysis.
-- `gofmt -l .` — must be empty; run `gofmt -w .` to fix.
+- `gofmt -l .` — must print nothing; run `gofmt -w .` to fix.
 
-## Layout
+## Before a PR
 
-- `cmd/` — entry points; each subdirectory is one binary.
-- `internal/` — packages private to this module.
+Run the pre-PR gates documented in the project skill:
+[.claude/skills/prepare-for-pr/SKILL.md](./.claude/skills/prepare-for-pr/SKILL.md).
 
 ## Conventions
 
-- Default to no comments. Only add one when the WHY is non-obvious.
-- Don't explain WHAT — well-named identifiers do that.
-- Return errors; don't panic in library code.
-- Keep new features inside existing packages unless there is a clear
-  reason to add a new one.
-- Tests live next to the code as `*_test.go`.
+Error handling, concurrency rules, logging, configuration,
+dependencies, test requirements, security, code style, and module
+layout live in
+[.claude/rules/conventions.md](./.claude/rules/conventions.md).
+Read and follow them for every change.

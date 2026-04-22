@@ -75,6 +75,8 @@ func TestInspectReadinessAllMissing(t *testing.T) {
 	}
 }
 
+// check only verifies presence; a directory at CLAUDE.md's path still
+// fails because the expected artifact is a file.
 func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, claudeMdPath), 0o755); err != nil {
@@ -84,58 +86,37 @@ func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 	if r.claudeMd.ok {
 		t.Error("CLAUDE.md-as-directory should not count as ok")
 	}
-	if !strings.Contains(r.claudeMd.detail, "directory") {
-		t.Errorf("detail = %q", r.claudeMd.detail)
-	}
 }
 
-func TestInspectReadinessCLAUDEEmpty(t *testing.T) {
+// Presence-only semantics: empty CLAUDE.md / SKILL.md are OK. Content
+// is the project's problem, not velocity's.
+func TestInspectReadinessEmptyFilesAreOK(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, claudeMdPath), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := inspectReadiness(dir)
-	if r.claudeMd.ok {
-		t.Error("empty CLAUDE.md should not count as ok")
-	}
-	if !strings.Contains(r.claudeMd.detail, "empty") {
-		t.Errorf("detail = %q", r.claudeMd.detail)
-	}
-}
-
-func TestInspectReadinessSkillEdgeCases(t *testing.T) {
-	dir := t.TempDir()
 	skillDir := filepath.Join(dir, ".claude", "skills", "prepare-for-pr")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := inspectReadiness(dir)
+	if !r.ready() {
+		t.Errorf("empty-but-present files should pass presence check, got %+v", r)
+	}
+}
 
-	// SKILL.md as a directory
-	skillAsDir := filepath.Join(skillDir, "SKILL.md")
-	if err := os.Mkdir(skillAsDir, 0o755); err != nil {
+func TestInspectReadinessSkillIsDir(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, ".claude", "skills", "prepare-for-pr", "SKILL.md")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	r := inspectReadiness(dir)
 	if r.prepareSkill.ok {
 		t.Error("SKILL.md-as-dir should not count as ok")
-	}
-	if !strings.Contains(r.prepareSkill.detail, "directory") {
-		t.Errorf("detail = %q", r.prepareSkill.detail)
-	}
-
-	// Replace with an empty file
-	if err := os.Remove(skillAsDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(skillAsDir, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r = inspectReadiness(dir)
-	if r.prepareSkill.ok {
-		t.Error("empty SKILL.md should not count as ok")
-	}
-	if !strings.Contains(r.prepareSkill.detail, "empty") {
-		t.Errorf("detail = %q", r.prepareSkill.detail)
 	}
 }
 
@@ -293,11 +274,48 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SKILL.md not written: %v", err)
 	}
-	if !strings.Contains(string(b), "go vet") {
-		t.Errorf("Go SKILL.md missing go vet gate:\n%s", b)
+	s := string(b)
+	for _, want := range []string{
+		"gofmt",
+		"go vet",
+		"go build",
+		"go test",
+		"-race",
+		"go mod tidy",
+		"mandatory",
+		"conventions.md",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("Go SKILL.md missing %q:\n%s", want, s)
+		}
 	}
 	if !strings.Contains(out.String(), "Detected go project") {
 		t.Errorf("expected 'Detected go project' in output, got:\n%s", out.String())
+	}
+
+	conventions := filepath.Join(dir, ".claude", "rules", "conventions.md")
+	cb, err := os.ReadFile(conventions)
+	if err != nil {
+		t.Fatalf("Go conventions.md not written: %v", err)
+	}
+	cs := string(cb)
+	for _, want := range []string{
+		"Errors",
+		"errors.Is",
+		"Concurrency",
+		"context.Context",
+		"log/slog",
+		"Testing",
+		"Table-driven",
+		"Security",
+		"ConstantTimeCompare",
+		"Layout",
+		"cmd/",
+		"internal/",
+	} {
+		if !strings.Contains(cs, want) {
+			t.Errorf("Go conventions.md missing %q:\n%s", want, cs)
+		}
 	}
 }
 
@@ -332,10 +350,9 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"detekt",
 		"lint",
 		"./gradlew check connectedCheck",
-		"MVI",
-		"Hilt",
 		"mandatory",
 		"E2E",
+		"conventions.md",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("Android SKILL.md missing %q:\n%s", want, s)
@@ -349,6 +366,22 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 	}
 	cs := string(cb)
 	for _, want := range []string{
+		"gradlew",
+		"connectedAndroidTest",
+		"conventions.md",
+	} {
+		if !strings.Contains(cs, want) {
+			t.Errorf("Android CLAUDE.md missing %q:\n%s", want, cs)
+		}
+	}
+
+	conventions := filepath.Join(dir, ".claude", "rules", "conventions.md")
+	vb, err := os.ReadFile(conventions)
+	if err != nil {
+		t.Fatalf("Android conventions.md not written: %v", err)
+	}
+	vs := string(vb)
+	for _, want := range []string{
 		"MVI",
 		"Intent",
 		"Effect",
@@ -358,9 +391,11 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"@HiltViewModel",
 		"@HiltAndroidTest",
 		"src/androidTest/",
+		"Testing",
+		"mandatory",
 	} {
-		if !strings.Contains(cs, want) {
-			t.Errorf("Android CLAUDE.md missing %q:\n%s", want, cs)
+		if !strings.Contains(vs, want) {
+			t.Errorf("Android conventions.md missing %q:\n%s", want, vs)
 		}
 	}
 }
