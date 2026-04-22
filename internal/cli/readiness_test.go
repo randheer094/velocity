@@ -312,6 +312,7 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 	if err := cmd.RunE(cmd, []string{dir}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
+
 	skill := filepath.Join(dir, ".claude", "skills", "prepare-for-pr", "SKILL.md")
 	b, err := os.ReadFile(skill)
 	if err != nil {
@@ -330,10 +331,36 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"adb wait-for-device",
 		"detekt",
 		"lint",
-		"./gradlew check",
+		"./gradlew check connectedCheck",
+		"MVI",
+		"Hilt",
+		"mandatory",
+		"E2E",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("Android SKILL.md missing %q:\n%s", want, s)
+		}
+	}
+
+	claudeMd := filepath.Join(dir, "CLAUDE.md")
+	cb, err := os.ReadFile(claudeMd)
+	if err != nil {
+		t.Fatalf("CLAUDE.md not written: %v", err)
+	}
+	cs := string(cb)
+	for _, want := range []string{
+		"MVI",
+		"Intent",
+		"Effect",
+		"reduce",
+		"Hilt",
+		"@HiltAndroidApp",
+		"@HiltViewModel",
+		"@HiltAndroidTest",
+		"src/androidTest/",
+	} {
+		if !strings.Contains(cs, want) {
+			t.Errorf("Android CLAUDE.md missing %q:\n%s", want, cs)
 		}
 	}
 }

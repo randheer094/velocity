@@ -263,15 +263,18 @@ Detects the project type and writes templated `CLAUDE.md` and
 
 - **Go** — gates on `gofmt`, `go vet`, `go build`, `go test`, plus a
   diff-review and PR-draft step.
-- **Android** — gates on `./gradlew assembleDebug`, `test`, `lint`,
-  `detekt` / `ktlintCheck` (where configured), and
-  `connectedAndroidTest`. Drives AVD / SDK provisioning through the
-  agent-focused [`android` CLI](https://developer.android.com/tools/agents/android-cli)
+- **Android** — enforces MVI (State / Intent / Effect / pure
+  reducer) + Hilt for DI via an architecture-review gate, then runs
+  the mandatory unit and E2E suites (`./gradlew test` and
+  `./gradlew connectedAndroidTest`), `./gradlew lint`, and
+  `detekt` / `ktlintCheck` (where configured). Drives AVD / SDK
+  provisioning through the agent-focused
+  [`android` CLI](https://developer.android.com/tools/agents/android-cli)
   (`android analyze`, `android sdk install`, `android avd create`,
   `android emulator`, `android skills`) and falls back to `adb` for
-  device-side interaction. Also documents `./gradlew check` /
-  `connectedCheck` as one-shot "run everything" entry points, plus a
-  diff-review and PR-draft step.
+  device-side interaction. Documents
+  `./gradlew check connectedCheck` as the one-shot "run everything"
+  entry point, plus a diff-review and PR-draft step.
 
 `prepare` is safe to re-run: files that already exist are skipped.
 Pass `--force` to overwrite them. Projects that match neither Go nor
