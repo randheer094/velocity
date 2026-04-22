@@ -265,10 +265,13 @@ Detects the project type and writes templated `CLAUDE.md` and
   diff-review and PR-draft step.
 - **Android** — gates on `./gradlew assembleDebug`, `test`, `lint`,
   `detekt` / `ktlintCheck` (where configured), and
-  `connectedAndroidTest` driven through the Android CLI tools
-  (`adb`, `emulator`, `avdmanager`). Also documents `./gradlew check`
-  / `connectedCheck` as one-shot "run everything" entry points, plus
-  a diff-review and PR-draft step.
+  `connectedAndroidTest`. Drives AVD / SDK provisioning through the
+  agent-focused [`android` CLI](https://developer.android.com/tools/agents/android-cli)
+  (`android analyze`, `android sdk install`, `android avd create`,
+  `android emulator`, `android skills`) and falls back to `adb` for
+  device-side interaction. Also documents `./gradlew check` /
+  `connectedCheck` as one-shot "run everything" entry points, plus a
+  diff-review and PR-draft step.
 
 `prepare` is safe to re-run: files that already exist are skipped.
 Pass `--force` to overwrite them. Projects that match neither Go nor
