@@ -120,14 +120,10 @@ func inspectReadiness(root string) readinessReport {
 	}
 
 	r.claudeMd = checkResult{name: "CLAUDE.md at project root"}
-	if info, err := os.Stat(filepath.Join(root, claudeMdPath)); err != nil {
-		r.claudeMd.detail = "missing — create CLAUDE.md with project context for Claude"
-	} else if info.IsDir() {
-		r.claudeMd.detail = "CLAUDE.md exists but is a directory"
-	} else if info.Size() == 0 {
-		r.claudeMd.detail = "CLAUDE.md is empty — add project context"
-	} else {
+	if fileExists(filepath.Join(root, claudeMdPath)) {
 		r.claudeMd.ok = true
+	} else {
+		r.claudeMd.detail = "missing — create CLAUDE.md or run `velocity prepare <path>`"
 	}
 
 	r.claudeDir = checkResult{name: ".claude/ directory at project root"}
@@ -138,15 +134,10 @@ func inspectReadiness(root string) readinessReport {
 	}
 
 	r.prepareSkill = checkResult{name: "prepare-for-pr skill installed (.claude/skills/prepare-for-pr/SKILL.md)"}
-	skillPath := filepath.Join(root, prepareSkillRel)
-	if info, err := os.Stat(skillPath); err != nil {
-		r.prepareSkill.detail = "missing — install with `velocity prepare <path>`"
-	} else if info.IsDir() {
-		r.prepareSkill.detail = "SKILL.md exists but is a directory"
-	} else if info.Size() == 0 {
-		r.prepareSkill.detail = "SKILL.md is empty — re-install with `velocity prepare --force <path>`"
-	} else {
+	if fileExists(filepath.Join(root, prepareSkillRel)) {
 		r.prepareSkill.ok = true
+	} else {
+		r.prepareSkill.detail = "missing — install with `velocity prepare <path>`"
 	}
 
 	return r

@@ -225,10 +225,15 @@ of Claude-facing context. `velocity check` tells you whether it does;
 
 ### What a "ready" project has
 
-1. **`CLAUDE.md`** at the repo root — non-empty project context for
-   Claude (build / test commands, layout, conventions).
-2. **`.claude/`** directory at the repo root — where project-scoped
-   rules and skills live.
+`velocity check` verifies three things are **present** at the repo
+root. It does not inspect their content — that's the project's job,
+and conventions in a freshly-prepared repo are deliberately something
+the team migrates to post-onboarding.
+
+1. **`CLAUDE.md`** — the project's high-level index for Claude
+   (build / test commands, where to find rules and skills).
+2. **`.claude/`** — the directory that holds project-scoped rules
+   (`.claude/rules/`) and skills (`.claude/skills/`).
 3. **`prepare-for-pr` skill** at
    `.claude/skills/prepare-for-pr/SKILL.md` — the pre-PR checklist
    (format, lint, test, review the diff) Claude runs before opening a
@@ -239,7 +244,8 @@ of Claude-facing context. `velocity check` tells you whether it does;
 Prints a per-check report and exits non-zero if anything is missing.
 The detected project type is reported at the top (Go if `go.mod` is
 present; Android if any of `build.gradle{,.kts}` or
-`settings.gradle{,.kts}` are present).
+`settings.gradle{,.kts}` are present). Presence-only — empty files
+pass.
 
 ```
 $ velocity check ./my-repo
@@ -258,20 +264,46 @@ Hint: run `velocity prepare /abs/path/my-repo` to install the missing pieces.
 
 ### `velocity prepare PROJECTPATH`
 
-Detects the project type and writes templated `CLAUDE.md` and
-`prepare-for-pr/SKILL.md` files tailored to it:
+Detects the project type and writes a starter set of templates:
 
-- **Go** — gates on `gofmt`, `go vet`, `go build`, `go test`, plus a
-  diff-review and PR-draft step.
-- **Android** — gates on `./gradlew assembleDebug`, `test`, `lint`,
-  `detekt` / `ktlintCheck` (where configured), and
-  `connectedAndroidTest`. Drives AVD / SDK provisioning through the
-  agent-focused [`android` CLI](https://developer.android.com/tools/agents/android-cli)
+```
+CLAUDE.md
+.claude/
+├── rules/conventions.md                       # project conventions to migrate to
+└── skills/prepare-for-pr/SKILL.md             # pre-PR gate checklist
+```
+
+Contents per project type:
+
+- **Go** — `CLAUDE.md` lists build / test / vet / fmt commands and
+  points at rules. `conventions.md` covers errors (`%w` wrapping,
+  `errors.Is`), concurrency (`context.Context` first, no fire-and-
+  forget goroutines, race detector), logging (`log/slog`),
+  configuration (env-only secrets), dependencies (`go mod tidy`,
+  minimal `go.mod`), testing (table-driven, ≥90% coverage), security
+  (parameterised SQL, `crypto/subtle`), code style, and layout
+  (`cmd/` / `internal/` / `pkg/`). `SKILL.md` runs `gofmt`,
+  `go vet`, lint, `go build`, `go mod tidy`, `go test`,
+  `go test -race`, the DB/integration harness if present, and a
+  coverage spot-check before the diff review.
+- **Android** — `CLAUDE.md` lists the Gradle build / test commands
+  and points at rules. `conventions.md` covers MVI (State / Intent /
+  Effect / pure `reduce`), Hilt for DI (entry points, modules,
+  scopes, test-time `@UninstallModules`), the mandatory
+  unit + E2E test split, code style, and module layout. `SKILL.md`
+  drives the agent-focused
+  [`android` CLI](https://developer.android.com/tools/agents/android-cli)
   (`android analyze`, `android sdk install`, `android avd create`,
-  `android emulator`, `android skills`) and falls back to `adb` for
-  device-side interaction. Also documents `./gradlew check` /
-  `connectedCheck` as one-shot "run everything" entry points, plus a
-  diff-review and PR-draft step.
+  `android emulator`, `android skills`) to provision AVDs, then
+  runs `./gradlew` for `assembleDebug`, `test`, `lint`, `detekt` /
+  `ktlintCheck`, and the mandatory `connectedAndroidTest`. Also
+  documents `./gradlew check connectedCheck` as a one-shot entry
+  point.
+
+Conventions in `conventions.md` are what the project migrates **to**
+after onboarding; they're not enforced by `velocity check`. Once a
+team adopts them, the `prepare-for-pr` skill assumes the code on
+disk already follows them.
 
 `prepare` is safe to re-run: files that already exist are skipped.
 Pass `--force` to overwrite them. Projects that match neither Go nor

@@ -1,12 +1,17 @@
 ---
 name: prepare-for-pr
-description: Run before opening a pull request on this Android project. Uses the agent-focused `android` CLI to boot devices and manage the SDK, runs unit + connected tests, and runs detekt / lint / ktlint where configured so the PR description writes itself.
+description: Run before opening a pull request on this Android project. Uses the agent-focused `android` CLI to boot devices and manage the SDK, runs the mandatory unit + E2E (connectedAndroidTest) suites, and runs lint / detekt / ktlint where configured so the PR description writes itself.
 ---
 
 # Prepare for PR (Android)
 
 Run these gates in order before opening a pull request. Stop at the
 first failure and fix it — do not open a PR with any step red.
+
+**Project conventions** (MVI, Hilt, testing, layout) live in
+[`.claude/rules/conventions.md`](../../rules/conventions.md). The
+gates below assume the code you're shipping already follows them;
+if it doesn't, fix it before running the gates.
 
 ## Android CLI (agent-focused wrapper)
 
@@ -83,7 +88,9 @@ adb emu kill
    module graph matches Gradle. Fix any mismatch before continuing.
 2. **Build.** `./gradlew assembleDebug` must succeed for every
    module touched by this change.
-3. **Unit tests.** `./gradlew test` must exit 0. If the change
+3. **Unit tests (mandatory).** `./gradlew test` must exit 0. Every
+   new reducer branch / use-case / mapper ships with at least one
+   JVM unit test (see `conventions.md` §Testing). If the change
    touches shared code, run the full suite — not just one module.
 4. **Android lint.** `./gradlew lint` must exit 0. Treat new
    warnings as failures unless they're explicitly baselined.
@@ -92,9 +99,12 @@ adb emu kill
    - `./gradlew ktlintCheck`
    - `./gradlew detekt`
    - `./gradlew spotlessCheck`
-6. **Instrumented tests.** If the change touches UI, navigation,
-   permissions, storage, or anything device-dependent, boot an AVD
-   via the sequence above and run `./gradlew connectedAndroidTest`.
+6. **E2E / instrumented tests (mandatory).** Boot an AVD via the
+   sequence above and run `./gradlew connectedAndroidTest`. Every
+   new Composable / screen / navigation edge / DI binding ships
+   with at least one instrumented test (see `conventions.md`
+   §Testing). A PR that skips this gate must explain in the body
+   why E2E coverage is impossible for the change.
 7. **Diff review.** Read `git diff origin/main...HEAD`:
    - Any `Log.d`, `println`, or debug-only code left in?
    - Any hard-coded user-visible strings that should live in
@@ -105,34 +115,30 @@ adb emu kill
    - **Title.** Imperative mood, under 70 characters.
    - **Body.** What changed, why, and how to verify. Include
      screenshots or a recording for any user-visible UI change.
+     Call out the unit + E2E tests that cover the change.
 
 ## Run-everything options
 
-Pick one of these when you want the whole suite in a single shot:
+Both options run the mandatory unit **and** E2E suites. Option A is
+the default; Option B is verbose for logs.
 
-### Option A — every check + unit tests (no device needed)
-
-```bash
-./gradlew check
-```
-
-`check` is Gradle's aggregator: it runs `test`, `lint`, and every
-verification task registered by the configured plugins (`detekt`,
-`ktlintCheck`, `spotlessCheck`, …). Default pre-PR sweep when the
-change is pure-logic.
-
-### Option B — every check + connected tests (device/emulator up)
+### Option A — one Gradle invocation (device/emulator up)
 
 ```bash
 # Bring up an AVD via the `android` CLI (see the boot sequence above), then:
 ./gradlew check connectedCheck
 ```
 
-`connectedCheck` runs `connectedAndroidTest` across every module
-with an `androidTest/` source set. Use this when the change touches
-UI or anything that only a real Android runtime can verify.
+`check` runs `test`, `lint`, and every configured verification task
+(`detekt`, `ktlintCheck`, `spotlessCheck`, …). `connectedCheck`
+runs `connectedAndroidTest` across every module with an
+`androidTest/` source set. Together they cover the mandatory unit
++ E2E gates in one go.
 
-### Option C — explicit, verbose, fail-fast
+> Do **not** ship on `./gradlew check` alone — it skips the E2E
+> gate. Either run the pair above, or use Option B.
+
+### Option B — explicit, verbose, fail-fast
 
 Useful when you want each gate to be its own line in the log:
 
@@ -148,6 +154,7 @@ android analyze \
 
 Drop `detekt` / `ktlintCheck` if the project doesn't configure them
 (`./gradlew tasks --all | grep -E 'detekt|ktlintCheck'` tells you).
+Never drop `test` or `connectedAndroidTest` — both are mandatory.
 
 Only open the PR once every gate above (for the option you picked)
 is green.
