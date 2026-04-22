@@ -4,10 +4,7 @@ Rules for this Go module. Pre-PR gates (format, vet, test, build)
 live in `.claude/skills/prepare-for-pr/SKILL.md` — don't duplicate
 them here.
 
-These rules are **non-negotiable**. If a change needs to deviate
-(e.g. a dependency genuinely requires a mutex pattern, or a package
-can't sit under `internal/`), stop and ask the reviewer before
-writing the code.
+These are the top-level rules for the module. Follow them.
 
 ## Errors
 

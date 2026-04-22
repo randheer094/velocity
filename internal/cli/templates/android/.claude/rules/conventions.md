@@ -4,14 +4,11 @@ Rules for this Android app / library. Pre-PR gates (build, lint,
 tests) live in `.claude/skills/prepare-for-pr/SKILL.md` — don't
 duplicate them here.
 
-These rules are **non-negotiable**. If a change needs to deviate
-(e.g. a third-party SDK only ships an XML view, or a feature
-genuinely can't be expressed in MVI), stop and ask the reviewer
-before writing the code.
+These are the top-level rules for the project. Follow them.
 
 ## Architecture
 
-### MVI (Model–View–Intent) — mandatory
+### MVI (Model–View–Intent)
 
 Every screen / feature uses MVI.
 
@@ -26,7 +23,7 @@ Every screen / feature uses MVI.
 - Views render `State` and forward user input as `Intent`.
 - Every `State` field survives process death via `SavedStateHandle`.
 
-### UI — Jetpack Compose only
+### UI: Jetpack Compose
 
 All UI is Jetpack Compose.
 
@@ -38,7 +35,7 @@ All UI is Jetpack Compose.
 - Non-trivial Composables ship with a `@Preview`.
 - Material 3 (`androidx.compose.material3`) is the design system.
 
-### Hilt for DI — mandatory
+### DI: Hilt
 
 Hilt is the DI framework.
 
@@ -53,7 +50,7 @@ Hilt is the DI framework.
   narrowest scope that works.
 - Tests use `@HiltAndroidTest` + `@UninstallModules` to swap fakes.
 
-## Testing (mandatory)
+## Testing
 
 - **Unit tests** under `src/test/`. Every reducer branch /
   use-case / mapper ships a JVM test (Turbine for `Flow`, MockK
