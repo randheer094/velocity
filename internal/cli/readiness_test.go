@@ -395,6 +395,48 @@ func TestNewPrepareCmdMissingPath(t *testing.T) {
 	}
 }
 
+// A regular file where we need a directory makes MkdirAll inside
+// installTemplates return ENOTDIR, which bubbles out as an error.
+func TestNewPrepareCmdMkdirAllFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// `.claude` as a regular file — MkdirAll(<root>/.claude/skills/…) fails.
+	if err := os.WriteFile(filepath.Join(dir, ".claude"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newPrepareCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.RunE(cmd, []string{dir}); err == nil {
+		t.Fatal("expected MkdirAll error")
+	}
+}
+
+// WriteFile against a path that is itself a directory fails with
+// "is a directory"; --force skips the pre-stat and hits WriteFile.
+func TestNewPrepareCmdWriteFileFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make SKILL.md a directory so os.WriteFile fails under --force.
+	skillPath := filepath.Join(dir, ".claude", "skills", "prepare-for-pr", "SKILL.md")
+	if err := os.MkdirAll(skillPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newPrepareCmd()
+	if err := cmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.RunE(cmd, []string{dir}); err == nil {
+		t.Fatal("expected WriteFile error")
+	}
+}
+
 func TestResolveProjectPathEmpty(t *testing.T) {
 	if _, err := resolveProjectPath(""); err == nil {
 		t.Error("expected error for empty path")
