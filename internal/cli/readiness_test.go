@@ -320,6 +320,7 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 		"Layout",
 		"cmd/",
 		"internal/",
+		"non-negotiable",
 	} {
 		if !strings.Contains(cs, want) {
 			t.Errorf("Go conventions.md missing %q:\n%s", want, cs)
@@ -401,6 +402,8 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"src/androidTest/",
 		"Testing",
 		"mandatory",
+		"non-negotiable",
+		"Jetpack Compose only",
 	} {
 		if !strings.Contains(vs, want) {
 			t.Errorf("Android conventions.md missing %q:\n%s", want, vs)
