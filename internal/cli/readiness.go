@@ -25,8 +25,8 @@ const (
 )
 
 const (
-	claudeMdPath   = "CLAUDE.md"
-	claudeDirPath  = ".claude"
+	claudeDirPath   = ".claude"
+	claudeMdPath    = ".claude/CLAUDE.md"
 	prepareSkillRel = ".claude/skills/prepare-for-pr/SKILL.md"
 )
 
@@ -56,7 +56,7 @@ func (r readinessReport) write(w io.Writer) {
 		fmt.Fprintf(w, "Project type: %s\n", r.projectType)
 	}
 	fmt.Fprintln(w)
-	for _, c := range []checkResult{r.claudeMd, r.claudeDir, r.prepareSkill} {
+	for _, c := range []checkResult{r.claudeDir, r.claudeMd, r.prepareSkill} {
 		mark := "[FAIL]"
 		if c.ok {
 			mark = "[ OK ]"
@@ -119,18 +119,18 @@ func inspectReadiness(root string) readinessReport {
 		projectType: detectProjectType(root),
 	}
 
-	r.claudeMd = checkResult{name: "CLAUDE.md at project root"}
-	if fileExists(filepath.Join(root, claudeMdPath)) {
-		r.claudeMd.ok = true
-	} else {
-		r.claudeMd.detail = "missing — create CLAUDE.md or run `velocity prepare <path>`"
-	}
-
 	r.claudeDir = checkResult{name: ".claude/ directory at project root"}
 	if dirExists(filepath.Join(root, claudeDirPath)) {
 		r.claudeDir.ok = true
 	} else {
-		r.claudeDir.detail = "missing — velocity stores skills and rules under .claude/"
+		r.claudeDir.detail = "missing — velocity stores CLAUDE.md, skills, and rules under .claude/"
+	}
+
+	r.claudeMd = checkResult{name: "CLAUDE.md under .claude/ (.claude/CLAUDE.md)"}
+	if fileExists(filepath.Join(root, claudeMdPath)) {
+		r.claudeMd.ok = true
+	} else {
+		r.claudeMd.detail = "missing — create .claude/CLAUDE.md or run `velocity prepare <path>`"
 	}
 
 	r.prepareSkill = checkResult{name: "prepare-for-pr skill installed (.claude/skills/prepare-for-pr/SKILL.md)"}
