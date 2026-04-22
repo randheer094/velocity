@@ -1,160 +1,40 @@
 ---
 name: prepare-for-pr
-description: Run before opening a pull request on this Android project. Uses the agent-focused `android` CLI to boot devices and manage the SDK, runs the mandatory unit + E2E (connectedAndroidTest) suites, and runs lint / detekt / ktlint where configured so the PR description writes itself.
+description: Run before opening a PR on this Android project. Uses the `android` CLI for AVDs, runs unit + connectedAndroidTest, lint, detekt/ktlint.
 ---
 
 # Prepare for PR (Android)
 
-Run these gates in order before opening a pull request. Stop at the
-first failure and fix it — do not open a PR with any step red.
+Stop at the first red gate; fix, then continue. Conventions live
+in [`.claude/rules/conventions.md`](../../rules/conventions.md).
 
-**Project conventions** (MVI, Hilt, testing, layout) live in
-[`.claude/rules/conventions.md`](../../rules/conventions.md). The
-gates below assume the code you're shipping already follows them;
-if it doesn't, fix it before running the gates.
-
-## Android CLI (agent-focused wrapper)
-
-This skill drives the **`android`** CLI — the agent-first wrapper
-documented at <https://developer.android.com/tools/agents/android-cli>.
-It's the preferred entry point for AVD and SDK management in agent
-workflows; it replaces most direct calls to `avdmanager`,
-`sdkmanager`, and `emulator`. `adb` is still used for device-side
-interaction (`wait-for-device`, logcat, shell).
-
-### Install / verify
+## Boot an emulator
 
 ```bash
-# macOS arm64
-curl -fsSL https://dl.google.com/android/cli/latest/darwin_arm64/install.sh | bash
-# (see the docs page for other platforms)
-
-android --version
-android info                       # prints the resolved ANDROID_HOME
-command -v adb || { echo "adb not on PATH — run `android sdk install platform-tools`"; exit 1; }
-```
-
-### Subcommands this skill uses
-
-- `android analyze` — emits project metadata (modules, build targets,
-  output artifact paths) as JSON. Run once early to confirm the agent
-  sees the same module graph Gradle does.
-- `android sdk install <pkg>` — install missing SDK packages
-  (`platform-tools`, `system-images;android-34;google_apis;x86_64`,
-  …).
-- `android avd list` / `android avd create` — enumerate or create an
-  AVD for instrumented tests.
-- `android emulator` — launch the AVD (use its `--help` for the
-  headless / no-audio flags your CI needs).
-- `android docs search <query>` / `android docs fetch <kb://…>` —
-  pull authoritative Android docs into the agent context when the
-  change needs platform-API guidance.
-- `android skills add` / `android skills init` — install or refresh
-  Android skills into your agent's skills directory.
-
-Always prefer `android <cmd> --help` for the exact flags your
-installed version supports — the CLI is young (v0.7, April 2026) and
-flags can move.
-
-### Boot an AVD for connected tests
-
-```bash
-# 1. Make sure platform-tools + a system image are present.
-android sdk install platform-tools
-android sdk install "system-images;android-34;google_apis;x86_64"
-
-# 2. Create (or reuse) an AVD.
-android avd list
-android avd create --profile pixel_6      # skip if one already exists
-
-# 3. Boot it headless.
-android emulator --avd <name> &           # see `android emulator --help`
-
-# 4. Wait until the device is fully booted before kicking off tests.
+android sdk install platform-tools "system-images;android-34;google_apis;x86_64"
+android avd create --profile pixel_6      # once
+android emulator --avd <name> &
 adb wait-for-device
 adb shell 'while [[ -z "$(getprop sys.boot_completed)" ]]; do sleep 1; done'
-adb shell input keyevent 82               # unlock
-
-# 5. Run the connected suite.
-./gradlew connectedAndroidTest
-
-# 6. Tear down.
-adb emu kill
 ```
 
-## Core gates (must all pass)
+## Gates
 
-1. **Analyze.** `android analyze` — confirms the agent's view of the
-   module graph matches Gradle. Fix any mismatch before continuing.
-2. **Build.** `./gradlew assembleDebug` must succeed for every
-   module touched by this change.
-3. **Unit tests (mandatory).** `./gradlew test` must exit 0. Every
-   new reducer branch / use-case / mapper ships with at least one
-   JVM unit test (see `conventions.md` §Testing). If the change
-   touches shared code, run the full suite — not just one module.
-4. **Android lint.** `./gradlew lint` must exit 0. Treat new
-   warnings as failures unless they're explicitly baselined.
-5. **Style / static analysis.** Run whichever of these the project
-   configures; skip the ones that aren't wired up:
-   - `./gradlew ktlintCheck`
-   - `./gradlew detekt`
-   - `./gradlew spotlessCheck`
-6. **E2E / instrumented tests (mandatory).** Boot an AVD via the
-   sequence above and run `./gradlew connectedAndroidTest`. Every
-   new Composable / screen / navigation edge / DI binding ships
-   with at least one instrumented test (see `conventions.md`
-   §Testing). A PR that skips this gate must explain in the body
-   why E2E coverage is impossible for the change.
-7. **Diff review.** Read `git diff origin/main...HEAD`:
-   - Any `Log.d`, `println`, or debug-only code left in?
-   - Any hard-coded user-visible strings that should live in
-     `strings.xml`?
-   - Any new permission added to `AndroidManifest.xml`? Justify it.
-   - Any new dependency in `build.gradle(.kts)`? Justify it.
-8. **PR draft.** Produce:
-   - **Title.** Imperative mood, under 70 characters.
-   - **Body.** What changed, why, and how to verify. Include
-     screenshots or a recording for any user-visible UI change.
-     Call out the unit + E2E tests that cover the change.
+1. `android analyze` — module graph sane.
+2. `./gradlew assembleDebug`.
+3. `./gradlew test` — unit suite.
+4. `./gradlew lint` — no new warnings.
+5. `./gradlew detekt` / `ktlintCheck` — whichever is wired.
+6. `./gradlew connectedAndroidTest` — instrumented suite.
+7. `git diff origin/main...HEAD` — scrub `Log.d`/`println`,
+   hardcoded strings, new permissions, new deps.
+8. PR: title imperative, under 70 chars. Body = what, why, how
+   to verify. Screenshots/recording for UI changes.
 
-## Run-everything options
-
-Both options run the mandatory unit **and** E2E suites. Option A is
-the default; Option B is verbose for logs.
-
-### Option A — one Gradle invocation (device/emulator up)
+One-shot equivalent (with device up):
 
 ```bash
-# Bring up an AVD via the `android` CLI (see the boot sequence above), then:
 ./gradlew check connectedCheck
 ```
 
-`check` runs `test`, `lint`, and every configured verification task
-(`detekt`, `ktlintCheck`, `spotlessCheck`, …). `connectedCheck`
-runs `connectedAndroidTest` across every module with an
-`androidTest/` source set. Together they cover the mandatory unit
-+ E2E gates in one go.
-
-> Do **not** ship on `./gradlew check` alone — it skips the E2E
-> gate. Either run the pair above, or use Option B.
-
-### Option B — explicit, verbose, fail-fast
-
-Useful when you want each gate to be its own line in the log:
-
-```bash
-android analyze \
-  && ./gradlew assembleDebug \
-  && ./gradlew test \
-  && ./gradlew lint \
-  && ./gradlew detekt \
-  && ./gradlew ktlintCheck \
-  && ./gradlew connectedAndroidTest
-```
-
-Drop `detekt` / `ktlintCheck` if the project doesn't configure them
-(`./gradlew tasks --all | grep -E 'detekt|ktlintCheck'` tells you).
-Never drop `test` or `connectedAndroidTest` — both are mandatory.
-
-Only open the PR once every gate above (for the option you picked)
-is green.
+See `android <cmd> --help` for CLI flags.

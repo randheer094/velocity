@@ -290,7 +290,6 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 		"go test",
 		"-race",
 		"go mod tidy",
-		"mandatory",
 		"conventions.md",
 	} {
 		if !strings.Contains(s, want) {
@@ -317,6 +316,9 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 		"Table-driven",
 		"Security",
 		"ConstantTimeCompare",
+		"## Build",
+		"CGO_ENABLED=0",
+		"-trimpath",
 		"Layout",
 		"cmd/",
 		"internal/",
@@ -353,14 +355,10 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"android avd",
 		"android sdk install",
 		"android emulator",
-		"android skills",
-		"developer.android.com/tools/agents/android-cli",
 		"adb wait-for-device",
 		"detekt",
 		"lint",
 		"./gradlew check connectedCheck",
-		"mandatory",
-		"E2E",
 		"conventions.md",
 	} {
 		if !strings.Contains(s, want) {
@@ -405,6 +403,10 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		"All UI is Jetpack Compose",
 		"Hilt is the DI framework",
 		"Every screen / feature uses MVI",
+		"Navigation 3",
+		"## Build",
+		"libs.versions.toml",
+		"allWarningsAsErrors",
 	} {
 		if !strings.Contains(vs, want) {
 			t.Errorf("Android conventions.md missing %q:\n%s", want, vs)

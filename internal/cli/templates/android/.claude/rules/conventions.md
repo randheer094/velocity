@@ -31,7 +31,7 @@ All UI is Jetpack Compose.
 
 - A single host `Activity` per app (`MainActivity`) annotated
   `@AndroidEntryPoint`.
-- Navigation is Jetpack Navigation Compose.
+- Navigation uses Navigation 3 (`androidx.navigation3`).
 - Composables render `State`; side effects run inside
   `LaunchedEffect` / `DisposableEffect`.
 - Non-trivial Composables ship with a `@Preview`.
@@ -71,6 +71,27 @@ Hilt is the DI framework.
 - Default to no comments; add one only when the WHY is non-obvious
   (hidden constraint, subtle invariant, workaround).
 - Doc comments: one line where possible.
+
+## Build
+
+- Gradle wrapper is checked in; every invocation goes through
+  `./gradlew`.
+- Build scripts are Kotlin DSL (`build.gradle.kts`).
+- Every dependency and version lives in
+  `gradle/libs.versions.toml`; module scripts reference catalog
+  aliases.
+- Android / Kotlin / Compose configuration lives in convention
+  plugins under `build-logic/`. Feature modules apply plugins,
+  not raw config blocks.
+- JVM toolchain is pinned in the convention plugin
+  (`kotlin { jvmToolchain(17) }`).
+- Kotlin compilation runs with `allWarningsAsErrors = true`.
+- Android lint runs with `abortOnError = true`.
+- Dependency versions in the catalog are exact (no `+`, no
+  `latest.release`).
+- `release` builds enable R8 and resource shrinking.
+- Signing config reads keystore path and passwords from env vars
+  injected by CI; keystores aren't committed.
 
 ## Layout
 

@@ -86,6 +86,19 @@ These are the top-level rules for the module. Follow them.
 - Avoid package-name stutter — use names like `foo.Client`,
   `foo.New`.
 
+## Build
+
+- Single `go.mod` per repo.
+- `go` directive pins the minor; `toolchain` directive pins the
+  patch.
+- Release build: `CGO_ENABLED=0 go build -trimpath
+  -ldflags="-s -w -X main.version=<git sha>"`.
+- Each `cmd/<binary>/` produces one static binary.
+- `replace` directives in the committed `go.mod` require a
+  one-line reason comment next to them.
+- `go mod tidy` is clean on every commit.
+- Vendoring stays off; the module proxy is the cache.
+
 ## Layout
 
 - `cmd/<binary>/` — entry points; one directory per binary. Thin
