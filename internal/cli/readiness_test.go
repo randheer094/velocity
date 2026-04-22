@@ -313,7 +313,7 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 		"context.Context",
 		"log/slog",
 		"Testing",
-		"Table-driven",
+		"table-driven",
 		"Security",
 		"ConstantTimeCompare",
 		"## Build",

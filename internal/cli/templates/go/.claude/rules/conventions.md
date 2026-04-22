@@ -26,8 +26,9 @@ These are the top-level rules for the module. Follow them.
 - Every goroutine has a clear owner that waits for it
   (`sync.WaitGroup`, `errgroup.Group`) or is tied to a lifecycle
   with a documented stop signal.
-- Use channels + context for coordination. When a mutex is
-  unavoidable, hold it for the smallest scope that's correct.
+- Coordination uses channels + context. A mutex is allowed only
+  to protect state private to a struct, held for the smallest
+  scope that's correct.
 - For synchronisation, use a channel, waitgroup, or
   `context.WithTimeout`.
 - `-race` must pass in CI.
@@ -55,12 +56,12 @@ These are the top-level rules for the module. Follow them.
 - Run `go mod tidy` before every commit. `replace` directives
   require a documented reason.
 
-## Testing (mandatory)
+## Testing
 
 - Every exported function has at least one unit test covering a
   happy path and the error path(s) a caller would hit.
 - Bug fixes ship with a regression test that fails before the fix.
-- Table-driven tests are the default for anything with > 1 case.
+- Anything with > 1 case is table-driven.
 - `go test -race ./...` passes.
 - External dependencies (DB, HTTP, filesystem) are exercised via a
   harness and skipped when the harness isn't available.
