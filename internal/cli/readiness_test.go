@@ -79,7 +79,7 @@ func TestInspectReadinessAllMissing(t *testing.T) {
 // fails because the expected artifact is a file.
 func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, claudeMdPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, claudeMdPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	r := inspectReadiness(dir)
@@ -92,7 +92,11 @@ func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 // is the project's problem, not velocity's.
 func TestInspectReadinessEmptyFilesAreOK(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, claudeMdPath), nil, 0o644); err != nil {
+	claudeMd := filepath.Join(dir, claudeMdPath)
+	if err := os.MkdirAll(filepath.Dir(claudeMd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeMd, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	skillDir := filepath.Join(dir, ".claude", "skills", "prepare-for-pr")
@@ -122,7 +126,11 @@ func TestInspectReadinessSkillIsDir(t *testing.T) {
 
 func TestInspectReadinessReady(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, claudeMdPath), []byte("# project\n"), 0o644); err != nil {
+	claudeMd := filepath.Join(dir, claudeMdPath)
+	if err := os.MkdirAll(filepath.Dir(claudeMd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeMd, []byte("# project\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	skillDir := filepath.Join(dir, ".claude", "skills", "prepare-for-pr")
@@ -265,9 +273,9 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 	if err := cmd.RunE(cmd, []string{dir}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	claudeMd := filepath.Join(dir, "CLAUDE.md")
+	claudeMd := filepath.Join(dir, claudeMdPath)
 	if b, err := os.ReadFile(claudeMd); err != nil || len(b) == 0 {
-		t.Errorf("CLAUDE.md not written: err=%v size=%d", err, len(b))
+		t.Errorf(".claude/CLAUDE.md not written: err=%v size=%d", err, len(b))
 	}
 	skill := filepath.Join(dir, ".claude", "skills", "prepare-for-pr", "SKILL.md")
 	b, err := os.ReadFile(skill)
@@ -359,10 +367,10 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 		}
 	}
 
-	claudeMd := filepath.Join(dir, "CLAUDE.md")
+	claudeMd := filepath.Join(dir, claudeMdPath)
 	cb, err := os.ReadFile(claudeMd)
 	if err != nil {
-		t.Fatalf("CLAUDE.md not written: %v", err)
+		t.Fatalf(".claude/CLAUDE.md not written: %v", err)
 	}
 	cs := string(cb)
 	for _, want := range []string{
@@ -415,7 +423,11 @@ func TestNewPrepareCmdSkipsExistingWithoutForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	pre := []byte("# keep me\n")
-	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), pre, 0o644); err != nil {
+	claudeMd := filepath.Join(dir, claudeMdPath)
+	if err := os.MkdirAll(filepath.Dir(claudeMd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeMd, pre, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmd := newPrepareCmd()
@@ -424,12 +436,12 @@ func TestNewPrepareCmdSkipsExistingWithoutForce(t *testing.T) {
 	if err := cmd.RunE(cmd, []string{dir}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	got, err := os.ReadFile(claudeMd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, pre) {
-		t.Errorf("CLAUDE.md was overwritten without --force:\n%s", got)
+		t.Errorf(".claude/CLAUDE.md was overwritten without --force:\n%s", got)
 	}
 	if !strings.Contains(out.String(), "skipped") {
 		t.Errorf("expected 'skipped' in output, got:\n%s", out.String())
@@ -441,7 +453,11 @@ func TestNewPrepareCmdForceOverwrites(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# old\n"), 0o644); err != nil {
+	claudeMd := filepath.Join(dir, claudeMdPath)
+	if err := os.MkdirAll(filepath.Dir(claudeMd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeMd, []byte("# old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmd := newPrepareCmd()
@@ -453,12 +469,12 @@ func TestNewPrepareCmdForceOverwrites(t *testing.T) {
 	if err := cmd.RunE(cmd, []string{dir}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	got, err := os.ReadFile(claudeMd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), "# old") {
-		t.Errorf("CLAUDE.md was not overwritten by --force:\n%s", got)
+		t.Errorf(".claude/CLAUDE.md was not overwritten by --force:\n%s", got)
 	}
 	if !strings.Contains(out.String(), "wrote") {
 		t.Errorf("expected 'wrote' in output, got:\n%s", out.String())
@@ -539,7 +555,11 @@ func seedReadyGoProject(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, claudeMdPath), []byte("# project\n"), 0o644); err != nil {
+	claudeMd := filepath.Join(dir, claudeMdPath)
+	if err := os.MkdirAll(filepath.Dir(claudeMd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeMd, []byte("# project\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	skillDir := filepath.Join(dir, ".claude", "skills", "prepare-for-pr")

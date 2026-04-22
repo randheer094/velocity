@@ -16,11 +16,11 @@ it exists.
 ## Before a PR
 
 Run the pre-PR gates documented in the project skill:
-[.claude/skills/prepare-for-pr/SKILL.md](./.claude/skills/prepare-for-pr/SKILL.md).
+[skills/prepare-for-pr/SKILL.md](./skills/prepare-for-pr/SKILL.md).
 
 ## Conventions
 
 Architecture (MVI + Hilt), test requirements, code style, and
 module layout live in
-[.claude/rules/conventions.md](./.claude/rules/conventions.md).
+[rules/conventions.md](./rules/conventions.md).
 Read and follow them for every change.

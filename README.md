@@ -225,19 +225,19 @@ of Claude-facing context. `velocity check` tells you whether it does;
 
 ### What a "ready" project has
 
-`velocity check` verifies three things are **present** at the repo
-root. It does not inspect their content — that's the project's job,
-and conventions in a freshly-prepared repo are deliberately something
-the team migrates to post-onboarding.
+`velocity check` verifies three things exist under **`.claude/`** at
+the repo root. Nothing Claude-facing lives in the repo root itself —
+it all sits under `.claude/`. The check is presence-only: contents
+aren't inspected, so conventions in a freshly-prepared repo are
+something the team migrates to post-onboarding.
 
-1. **`CLAUDE.md`** — the project's high-level index for Claude
-   (build / test commands, where to find rules and skills).
-2. **`.claude/`** — the directory that holds project-scoped rules
-   (`.claude/rules/`) and skills (`.claude/skills/`).
-3. **`prepare-for-pr` skill** at
-   `.claude/skills/prepare-for-pr/SKILL.md` — the pre-PR checklist
-   (format, lint, test, review the diff) Claude runs before opening a
-   pull request.
+1. **`.claude/`** — the directory that holds every Claude-facing
+   file (`CLAUDE.md`, `rules/`, `skills/`).
+2. **`.claude/CLAUDE.md`** — the project's high-level index for
+   Claude (build / test commands, where to find rules and skills).
+3. **`.claude/skills/prepare-for-pr/SKILL.md`** — the pre-PR
+   checklist (format, lint, test, review the diff) Claude runs
+   before opening a pull request.
 
 ### `velocity check PROJECTPATH`
 
@@ -252,9 +252,10 @@ $ velocity check ./my-repo
 Velocity readiness report for /abs/path/my-repo
 Project type: go
 
-  [ OK ] CLAUDE.md at project root
   [FAIL] .claude/ directory at project root
-         missing — velocity stores skills and rules under .claude/
+         missing — velocity stores CLAUDE.md, skills, and rules under .claude/
+  [FAIL] CLAUDE.md under .claude/ (.claude/CLAUDE.md)
+         missing — create .claude/CLAUDE.md or run `velocity prepare <path>`
   [FAIL] prepare-for-pr skill installed (.claude/skills/prepare-for-pr/SKILL.md)
          missing — install with `velocity prepare <path>`
 
@@ -264,18 +265,19 @@ Hint: run `velocity prepare /abs/path/my-repo` to install the missing pieces.
 
 ### `velocity prepare PROJECTPATH`
 
-Detects the project type and writes a starter set of templates:
+Detects the project type and writes a starter set of templates,
+all under `.claude/`:
 
 ```
-CLAUDE.md
 .claude/
+├── CLAUDE.md                                  # high-level index for Claude
 ├── rules/conventions.md                       # project conventions to migrate to
 └── skills/prepare-for-pr/SKILL.md             # pre-PR gate checklist
 ```
 
 Contents per project type:
 
-- **Go** — `CLAUDE.md` lists build / test / vet / fmt commands and
+- **Go** — `.claude/CLAUDE.md` lists build / test / vet / fmt commands and
   points at rules. `conventions.md` covers errors (`%w` wrapping,
   `errors.Is`), concurrency (`context.Context` first, no fire-and-
   forget goroutines, race detector), logging (`log/slog`),
@@ -286,7 +288,7 @@ Contents per project type:
   `go vet`, lint, `go build`, `go mod tidy`, `go test`,
   `go test -race`, the DB/integration harness if present, and a
   coverage spot-check before the diff review.
-- **Android** — `CLAUDE.md` lists the Gradle build / test commands
+- **Android** — `.claude/CLAUDE.md` lists the Gradle build / test commands
   and points at rules. `conventions.md` covers MVI (State / Intent /
   Effect / pure `reduce`), Hilt for DI (entry points, modules,
   scopes, test-time `@UninstallModules`), the mandatory
