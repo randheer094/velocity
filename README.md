@@ -32,15 +32,16 @@ rules and source-tree layout, see [**CLAUDE.md**](./CLAUDE.md).
 4. [Postgres](#postgres)
 5. [Run the daemon](#run-the-daemon)
 6. [Commands](#commands)
-7. [Configuration reference](#configuration-reference)
-8. [Webhook configuration](#webhook-configuration)
-9. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
-10. [Files on disk](#files-on-disk)
-11. [Dependency tracking](#dependency-tracking)
-12. [Limitations](#limitations)
-13. [Test](#test)
-14. [Deploy](#deploy)
-15. [Troubleshooting](#troubleshooting)
+7. [Project readiness](#project-readiness)
+8. [Configuration reference](#configuration-reference)
+9. [Webhook configuration](#webhook-configuration)
+10. [Jira custom field for repo URL](#jira-custom-field-for-repo-url)
+11. [Files on disk](#files-on-disk)
+12. [Dependency tracking](#dependency-tracking)
+13. [Limitations](#limitations)
+14. [Test](#test)
+15. [Deploy](#deploy)
+16. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -211,7 +212,71 @@ directory (default `~/.velocity`).
 | `velocity status` | Print `running (pid N)` or `stopped`. Exit 0 if running. |
 | `velocity logs` | Print `~/.velocity/daemon.log`. |
 | `velocity logs -f` | Tail the log. |
+| `velocity check <path>` | Report whether a project has the files velocity expects. |
+| `velocity prepare <path>` | Install `CLAUDE.md` and the `prepare-for-pr` skill (Go / Android). |
+| `velocity prepare <path> --force` | Overwrite existing files when preparing. |
 | `velocity --dir <path>` | Target an alternate data directory. |
+
+## Project readiness
+
+Before velocity opens PRs against a repo, the repo should carry a bit
+of Claude-facing context. `velocity check` tells you whether it does;
+`velocity prepare` installs what's missing.
+
+### What a "ready" project has
+
+1. **`CLAUDE.md`** at the repo root — non-empty project context for
+   Claude (build / test commands, layout, conventions).
+2. **`.claude/`** directory at the repo root — where project-scoped
+   rules and skills live.
+3. **`prepare-for-pr` skill** at
+   `.claude/skills/prepare-for-pr/SKILL.md` — the pre-PR checklist
+   (format, lint, test, review the diff) Claude runs before opening a
+   pull request.
+
+### `velocity check PROJECTPATH`
+
+Prints a per-check report and exits non-zero if anything is missing.
+The detected project type is reported at the top (Go if `go.mod` is
+present; Android if any of `build.gradle{,.kts}` or
+`settings.gradle{,.kts}` are present).
+
+```
+$ velocity check ./my-repo
+Velocity readiness report for /abs/path/my-repo
+Project type: go
+
+  [ OK ] CLAUDE.md at project root
+  [FAIL] .claude/ directory at project root
+         missing — velocity stores skills and rules under .claude/
+  [FAIL] prepare-for-pr skill installed (.claude/skills/prepare-for-pr/SKILL.md)
+         missing — install with `velocity prepare <path>`
+
+Result: NOT READY
+Hint: run `velocity prepare /abs/path/my-repo` to install the missing pieces.
+```
+
+### `velocity prepare PROJECTPATH`
+
+Detects the project type and writes templated `CLAUDE.md` and
+`prepare-for-pr/SKILL.md` files tailored to it:
+
+- **Go** — gates on `gofmt`, `go vet`, `go build`, `go test`, plus a
+  diff-review and PR-draft step.
+- **Android** — gates on `./gradlew assembleDebug`, `test`, `lint`,
+  `detekt` / `ktlintCheck` (where configured), and
+  `connectedAndroidTest`. Drives AVD / SDK provisioning through the
+  agent-focused [`android` CLI](https://developer.android.com/tools/agents/android-cli)
+  (`android analyze`, `android sdk install`, `android avd create`,
+  `android emulator`, `android skills`) and falls back to `adb` for
+  device-side interaction. Also documents `./gradlew check` /
+  `connectedCheck` as one-shot "run everything" entry points, plus a
+  diff-review and PR-draft step.
+
+`prepare` is safe to re-run: files that already exist are skipped.
+Pass `--force` to overwrite them. Projects that match neither Go nor
+Android are rejected — author those files by hand, or open an issue
+to request a template.
 
 ## Configuration reference
 
