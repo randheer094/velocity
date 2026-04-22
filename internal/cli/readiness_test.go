@@ -317,8 +317,20 @@ func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SKILL.md not written: %v", err)
 	}
-	if !strings.Contains(string(b), "gradlew") {
-		t.Errorf("Android SKILL.md missing gradlew gates:\n%s", b)
+	s := string(b)
+	for _, want := range []string{
+		"gradlew",
+		"connectedAndroidTest",
+		"adb",
+		"emulator",
+		"avdmanager",
+		"detekt",
+		"lint",
+		"./gradlew check",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("Android SKILL.md missing %q:\n%s", want, s)
+		}
 	}
 }
 

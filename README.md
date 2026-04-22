@@ -264,8 +264,11 @@ Detects the project type and writes templated `CLAUDE.md` and
 - **Go** — gates on `gofmt`, `go vet`, `go build`, `go test`, plus a
   diff-review and PR-draft step.
 - **Android** — gates on `./gradlew assembleDebug`, `test`, `lint`,
-  `ktlintCheck`, optional `connectedAndroidTest`, plus a diff-review
-  and PR-draft step.
+  `detekt` / `ktlintCheck` (where configured), and
+  `connectedAndroidTest` driven through the Android CLI tools
+  (`adb`, `emulator`, `avdmanager`). Also documents `./gradlew check`
+  / `connectedCheck` as one-shot "run everything" entry points, plus
+  a diff-review and PR-draft step.
 
 `prepare` is safe to re-run: files that already exist are skipped.
 Pass `--force` to overwrite them. Projects that match neither Go nor
