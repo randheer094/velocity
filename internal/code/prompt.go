@@ -34,21 +34,11 @@ Constraints:
   would make your change feel cleaner.
 
 Verification — required before you finish:
-- If the repo contains .claude/skills/prepare-for-pr/SKILL.md, you
-  MUST read it and run every gate it defines before declaring
-  success. It is the project's pre-PR contract and overrides the
-  generic commands below. If any gate fails, fix the cause within
-  scope and re-run until all gates pass.
-- If that skill is absent, run the repository's build and test
-  commands for the languages and packages you touched. Prefer
-  canonical commands documented in a Makefile, justfile, scripts/
-  directory, or CONTRIBUTING.md; otherwise infer them from the
-  toolchain (e.g. "go build ./... && go test ./...",
-  "npm run build && npm test", "cargo build && cargo test").
-- Both build and test must pass. If either fails, fix the cause within
-  scope and re-run until both are green. Do not declare success on a
-  red build or red tests — the runner trusts your final output and
-  opens the PR immediately.
+- If .claude/skills/prepare-for-pr/SKILL.md exists, run every gate
+  it defines. Otherwise run the repo's build and test commands
+  (Makefile / justfile / scripts/, else toolchain defaults).
+- All gates must pass. Fix within scope and re-run — the runner
+  opens the PR immediately on your final output.
 
 When you are done, the LAST line of your output must be a single line
 in this exact form:
@@ -94,17 +84,10 @@ Constraints:
   runner.
 
 Verification — required before you finish:
-- If the repo contains .claude/skills/prepare-for-pr/SKILL.md, you
-  MUST read it and run every gate it defines before declaring
-  success. It is the project's pre-PR contract and overrides the
-  generic commands below. If any gate fails, fix the cause within
-  scope and re-run until all gates pass.
-- If that skill is absent, run the repository's build and test
-  commands. Prefer canonical commands documented in a Makefile,
-  justfile, scripts/ directory, or CONTRIBUTING.md; otherwise infer
-  them from the toolchain.
-- Both build and test must pass. If either fails, fix the cause within
-  scope and re-run until both are green.
+- If .claude/skills/prepare-for-pr/SKILL.md exists, run every gate
+  it defines. Otherwise run the repo's build and test commands
+  (Makefile / justfile / scripts/, else toolchain defaults).
+- All gates must pass. Fix within scope and re-run until green.
 
 When you are done, the LAST line of your output must be a single line
 in this exact form:
