@@ -17,7 +17,7 @@ func removeWorkspaceForKey(key string) error {
 
 func TestBuildIteratePromptContainsExtra(t *testing.T) {
 	got := buildIteratePrompt("PROJ-1", "title", "desc", "main", "fix the flaky CI")
-	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI", `"main"`, "rebase"} {
+	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI", `"main"`, "rebase", ".claude/skills/prepare-for-pr/SKILL.md"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q: %s", want, got)
 		}

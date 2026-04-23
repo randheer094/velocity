@@ -69,8 +69,15 @@ func TestCancelHelpers(t *testing.T) {
 
 func TestBuildCodePrompt(t *testing.T) {
 	got := buildCodePrompt("PROJ-1", "title", "desc")
-	if !strings.Contains(got, "PROJ-1") || !strings.Contains(got, "title") || !strings.Contains(got, "desc") {
-		t.Errorf("prompt missing fields: %q", got)
+	for _, want := range []string{
+		"PROJ-1",
+		"title",
+		"desc",
+		".claude/skills/prepare-for-pr/SKILL.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q: %s", want, got)
+		}
 	}
 }
 
