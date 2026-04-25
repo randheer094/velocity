@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -89,8 +90,10 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 			return nil
 		case data.PlanCoding:
 			if existing.ActiveWaveIdx < len(existing.Waves) {
-				slog.Info("arch: plan active, advancing instead of re-planning", "key", parentKey)
-				return AdvanceWave(ctx, parentKey)
+				slog.Info("arch: plan active, enqueueing advance", "key", parentKey)
+				EnqueueFn(kindAdvanceWave, "arch.AdvanceWave:"+parentKey,
+					map[string]any{"parent_key": parentKey})
+				return nil
 			}
 		case data.PlanPlanningFailed:
 			slog.Info("arch: wiping prior failed plan for retry", "key", parentKey)
@@ -190,11 +193,16 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		client.Transition(parentKey, coding)
 	}
 
-	*stage = "assign-wave-0"
-	return assignWave(ctx, p, 0)
+	*stage = "enqueue-assign-wave-0"
+	EnqueueFn(kindAssignWave, "arch.AssignWave:"+parentKey+":0",
+		map[string]any{"parent_key": parentKey, "wave_idx": 0})
+	return nil
 }
 
-// AdvanceWave advances or finalises the plan for parentKey.
+// AdvanceWave evaluates whether the parent's active wave is complete
+// and enqueues the next step (re-advance, AssignWave, or Archive).
+// It does not inline-call any other kind: each branch returns after
+// at most one DB write plus one enqueue.
 func AdvanceWave(ctx context.Context, parentKey string) error {
 	p, err := db.GetPlan(ctx, parentKey)
 	if err != nil {
@@ -209,15 +217,21 @@ func AdvanceWave(ctx context.Context, parentKey string) error {
 		return errors.New("jira client not initialised")
 	}
 	if p.ActiveWaveIdx >= len(p.Waves) {
-		return archiveDone(ctx, client, p)
+		EnqueueFn(kindArchive, "arch.Archive:"+parentKey,
+			map[string]any{"parent_key": parentKey})
+		return nil
 	}
 
 	active := p.Waves[p.ActiveWaveIdx]
 	keys := keysOf(active)
 	if len(keys) == 0 {
 		p.ActiveWaveIdx++
-		_ = db.SavePlan(ctx, p)
-		return AdvanceWave(ctx, parentKey)
+		if err := db.SavePlan(ctx, p); err != nil {
+			return err
+		}
+		EnqueueFn(kindAdvanceWave, "arch.AdvanceWave:"+parentKey,
+			map[string]any{"parent_key": parentKey})
+		return nil
 	}
 	issues := client.GetTasksStatus(keys)
 	if !allDone(issues, keys) {
@@ -230,56 +244,92 @@ func AdvanceWave(ctx context.Context, parentKey string) error {
 		return err
 	}
 	if p.ActiveWaveIdx >= len(p.Waves) {
-		return archiveDone(ctx, client, p)
+		EnqueueFn(kindArchive, "arch.Archive:"+parentKey,
+			map[string]any{"parent_key": parentKey})
+		return nil
 	}
-	return assignWave(ctx, p, p.ActiveWaveIdx)
+	EnqueueFn(kindAssignWave,
+		"arch.AssignWave:"+parentKey+":"+strconv.Itoa(p.ActiveWaveIdx),
+		map[string]any{"parent_key": parentKey, "wave_idx": p.ActiveWaveIdx})
+	return nil
 }
 
-func assignWave(_ context.Context, p *data.Plan, idx int) error {
-	client := jira.Shared()
-	if client == nil {
-		return errors.New("jira client not initialised")
+// AssignWave assigns every sub-task in one wave to the developer.
+// Loop stays inline — the user's "one task per event" rule covers
+// logical steps, not per-iteration enqueues.
+func AssignWave(ctx context.Context, parentKey string, waveIdx int) error {
+	p, err := db.GetPlan(ctx, parentKey)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		slog.Info("arch: no plan for parent, skipping assign", "key", parentKey)
+		return nil
 	}
 	cfg := config.Get()
 	if cfg == nil {
 		return errors.New("config not loaded")
 	}
-	if idx < 0 || idx >= len(p.Waves) {
-		return fmt.Errorf("wave idx %d out of range", idx)
+	client := jira.Shared()
+	if client == nil {
+		return errors.New("jira client not initialised")
 	}
-	for _, t := range p.Waves[idx].Tasks {
+	if waveIdx < 0 || waveIdx >= len(p.Waves) {
+		return fmt.Errorf("wave idx %d out of range", waveIdx)
+	}
+	for _, t := range p.Waves[waveIdx].Tasks {
 		key := t.JiraKey
 		if key == "" {
-			slog.Warn("arch: wave task missing jira key", "title", t.Title, "parent", p.ParentJiraKey)
+			slog.Warn("arch: wave task missing jira key", "title", t.Title, "parent", parentKey)
 			continue
 		}
 		if !client.Assign(key, cfg.Jira.DeveloperJiraID) {
 			slog.Error("arch: assign failed", "key", key)
 		}
 	}
-	slog.Info("arch: wave assigned", "parent", p.ParentJiraKey, "wave", idx, "count", len(p.Waves[idx].Tasks))
+	slog.Info("arch: wave assigned", "parent", parentKey, "wave", waveIdx, "count", len(p.Waves[waveIdx].Tasks))
 	return nil
 }
 
-func archiveDone(ctx context.Context, client *jira.Client, p *data.Plan) error {
+// Archive transitions the parent to DONE, marks the plan done in the
+// DB, and removes the parent + every sub-task workspace. When an LLM
+// run is still in flight for the parent, the workspace cleanup is
+// skipped (the in-flight Run owns those files); the next Run's
+// pre-clone RemoveAll handles eventual cleanup.
+func Archive(ctx context.Context, parentKey string) error {
+	p, err := db.GetPlan(ctx, parentKey)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return nil
+	}
+	client := jira.Shared()
+	if client == nil {
+		return errors.New("jira client not initialised")
+	}
 	done := status.TaskJiraName(status.Done)
 	if done != "" {
-		if !client.Transition(p.ParentJiraKey, done) {
-			return fmt.Errorf("failed to transition parent %s to %s", p.ParentJiraKey, done)
+		if !client.Transition(parentKey, done) {
+			return fmt.Errorf("failed to transition parent %s to %s", parentKey, done)
 		}
 	}
-	if err := db.MarkPlanDone(ctx, p.ParentJiraKey, done); err != nil {
-		slog.Warn("arch: failed to mark plan done", "key", p.ParentJiraKey, "err", err)
+	if err := db.MarkPlanDone(ctx, parentKey, done); err != nil {
+		slog.Warn("arch: failed to mark plan done", "key", parentKey, "err", err)
 	}
-	_ = os.RemoveAll(config.WorkspacePath(p.ParentJiraKey))
-	for _, w := range p.Waves {
-		for _, t := range w.Tasks {
-			if t.JiraKey != "" {
-				_ = os.RemoveAll(config.WorkspacePath(t.JiraKey))
+	if IsInFlight(parentKey) {
+		slog.Warn("arch: parent run in flight, skipping workspace cleanup", "key", parentKey)
+	} else {
+		_ = os.RemoveAll(config.WorkspacePath(parentKey))
+		for _, w := range p.Waves {
+			for _, t := range w.Tasks {
+				if t.JiraKey != "" {
+					_ = os.RemoveAll(config.WorkspacePath(t.JiraKey))
+				}
 			}
 		}
 	}
-	slog.Info("arch: parent done, plan archived (DB retained)", "key", p.ParentJiraKey)
+	slog.Info("arch: parent done, plan archived (DB retained)", "key", parentKey)
 	return nil
 }
 

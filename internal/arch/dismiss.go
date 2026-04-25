@@ -15,6 +15,10 @@ import (
 // OnDismissed cascades DISMISSED to every still-open sub-task.
 // Best-effort: per-step failures are logged but do not abort.
 // jiraStatus is the parent's Jira status name from the dismiss webhook.
+//
+// The internal sub-task loop stays inline — it's part of this one
+// logical step. Workspace cleanup is skipped if a Run is still in
+// flight for the parent (its pre-clone RemoveAll will catch up).
 func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 	cancelIfRunning(parentKey)
 
@@ -61,6 +65,10 @@ func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 	if err := db.MarkPlanDismissed(ctx, parentKey, jiraStatus); err != nil {
 		slog.Warn("arch: mark plan dismissed", "key", parentKey, "err", err)
 	}
-	_ = os.RemoveAll(config.WorkspacePath(parentKey))
+	if IsInFlight(parentKey) {
+		slog.Warn("arch: parent run in flight, skipping workspace cleanup on dismiss", "key", parentKey)
+	} else {
+		_ = os.RemoveAll(config.WorkspacePath(parentKey))
+	}
 	return nil
 }

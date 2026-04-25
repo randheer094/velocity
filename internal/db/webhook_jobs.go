@@ -11,9 +11,9 @@ import (
 	"github.com/randheer094/velocity/internal/data"
 )
 
-// InsertWebhookJob adds a pending row to the queue and returns its id.
+// InsertWebhookJob adds a pending row to the given queue and returns its id.
 // Payload is marshalled to JSON; callers should pass a typed struct.
-func InsertWebhookJob(ctx context.Context, kind, name string, payload any) (int64, error) {
+func InsertWebhookJob(ctx context.Context, queue, kind, name string, payload any) (int64, error) {
 	p := Shared()
 	if p == nil {
 		return 0, ErrNotStarted
@@ -24,21 +24,21 @@ func InsertWebhookJob(ctx context.Context, kind, name string, payload any) (int6
 	}
 	var id int64
 	err = p.QueryRow(ctx, `
-		INSERT INTO webhook_jobs (kind, name, payload)
-		VALUES ($1, $2, $3)
+		INSERT INTO webhook_jobs (queue, kind, name, payload)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, kind, name, raw).Scan(&id)
+	`, queue, kind, name, raw).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
 	return id, nil
 }
 
-// ClaimNextWebhookJob returns the oldest pending job and marks it
-// running in a single statement. Safe for concurrent workers:
-// FOR UPDATE SKIP LOCKED guarantees each row is handed to exactly
-// one caller. Returns (nil, nil) when the queue is empty.
-func ClaimNextWebhookJob(ctx context.Context) (*data.WebhookJob, error) {
+// ClaimNextWebhookJob returns the oldest pending job for the given queue
+// and marks it running in a single statement. Safe for concurrent workers:
+// FOR UPDATE SKIP LOCKED guarantees each row is handed to exactly one
+// caller. Returns (nil, nil) when the queue is empty.
+func ClaimNextWebhookJob(ctx context.Context, queue string) (*data.WebhookJob, error) {
 	p := Shared()
 	if p == nil {
 		return nil, ErrNotStarted
@@ -48,7 +48,7 @@ func ClaimNextWebhookJob(ctx context.Context) (*data.WebhookJob, error) {
 	err := p.QueryRow(ctx, `
 		WITH next AS (
 			SELECT id FROM webhook_jobs
-			WHERE status = 'pending'
+			WHERE status = 'pending' AND queue = $1
 			ORDER BY id
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
@@ -59,10 +59,10 @@ func ClaimNextWebhookJob(ctx context.Context) (*data.WebhookJob, error) {
 		    attempts = j.attempts + 1
 		FROM next
 		WHERE j.id = next.id
-		RETURNING j.id, j.kind, j.name, j.payload, j.status, j.attempts,
+		RETURNING j.id, j.queue, j.kind, j.name, j.payload, j.status, j.attempts,
 		          j.last_error, j.enqueued_at, j.started_at, j.finished_at
-	`).Scan(
-		&j.ID, &j.Kind, &j.Name, &j.Payload, &statusStr, &j.Attempts,
+	`, queue).Scan(
+		&j.ID, &j.Queue, &j.Kind, &j.Name, &j.Payload, &statusStr, &j.Attempts,
 		&j.LastError, &j.EnqueuedAt, &j.StartedAt, &j.FinishedAt,
 	)
 	if err != nil {
@@ -124,13 +124,17 @@ func ResetRunningWebhookJobs(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// CountPendingWebhookJobs backs the soft-cap check in webhook.Enqueue.
-func CountPendingWebhookJobs(ctx context.Context) (int, error) {
+// CountPendingWebhookJobs returns the pending backlog for the given queue;
+// backs the soft-cap check in webhook.Enqueue.
+func CountPendingWebhookJobs(ctx context.Context, queue string) (int, error) {
 	p := Shared()
 	if p == nil {
 		return 0, ErrNotStarted
 	}
 	var n int
-	err := p.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_jobs WHERE status = 'pending'`).Scan(&n)
+	err := p.QueryRow(ctx,
+		`SELECT COUNT(*) FROM webhook_jobs WHERE status = 'pending' AND queue = $1`,
+		queue,
+	).Scan(&n)
 	return n, err
 }

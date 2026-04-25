@@ -91,8 +91,8 @@ Failed" Jira status — velocity uses `coding_failed` internally.
 ## Wave math
 
 A plan groups sub-tasks into ordered waves. Tasks in the same wave
-run in parallel (subject to `server.max_concurrency`); waves are
-strictly sequential.
+run in parallel (subject to `server.max_concurrency`, which gates
+the LLM queue); waves are strictly sequential.
 
 - Parent advances past wave *N* when every sub-task in wave *N* is
   canonical `done` (which includes the dismissed-alias case).
@@ -209,27 +209,41 @@ The HTTP handlers do zero work. Each webhook:
 handler ──► webhook.Enqueue(kind, name, payload)
                │
                ▼
-          INSERT INTO webhook_jobs (status='pending')
-               │
+          INSERT INTO webhook_jobs (queue, status='pending')
+               │            queue ∈ {llm, ops}
                ▼
-          N pollers (server.max_concurrency, default 1 = serial)
-          claim via SELECT … FOR UPDATE SKIP LOCKED
-               │
-               ▼
-        dispatch(kind) → arch.Run / code.Run /
-                         arch.AdvanceWave / code.MarkMerged /
-                         code.Iterate / arch.OnDismissed / …
+   ┌─ llm pool: N pollers (server.max_concurrency)  ─┐
+   │  claim WHERE queue='llm' FOR UPDATE SKIP LOCKED │
+   └─ ops pool: 1 poller (strictly serialized)       ─┘
+                  claim WHERE queue='ops' FOR UPDATE SKIP LOCKED
+                  │
+                  ▼
+        dispatch(kind) → arch.Run / code.Run / code.Iterate (llm)
+                       │ arch.AdvanceWave / arch.AssignWave /
+                       │ arch.Archive / arch.OnDismissed /
+                       │ code.MarkMerged / code.OnDismissed /
+                       │ code.Cleanup (ops)
 ```
 
 - Handlers return `202` immediately.
-- Enqueue is a single row insert with a JSON payload — no closures,
-  no shared in-memory state. Jobs survive daemon restart.
-- With `max_concurrency = 1`, pollers claim FIFO (oldest `id` first)
-  and run serially.
-- With `N > 1`, each worker claims its own row via `FOR UPDATE SKIP
-  LOCKED`; up to N jobs run in parallel.
-- `server.queue_size` is a **soft cap** on pending rows. When the
-  backlog exceeds it, Enqueue logs + drops so handlers never block.
+- Each row represents **one logical step**. Handlers never inline-call
+  another kind's logic — when more work is needed they enqueue a
+  follow-up row and return.
+- The **llm queue** carries long-running `arch.Run` / `code.Run` /
+  `code.Iterate`. Parallelism = `server.max_concurrency` (default 1
+  = strict serial; raise it if your Claude/Jira/GitHub stacks
+  tolerate it).
+- The **ops queue** carries every other kind: lightweight DB/Jira/
+  GitHub steps and workspace cleanup. It runs strictly serialized
+  (1 worker), so `arch.AdvanceWave`, `arch.AssignWave`,
+  `arch.Archive`, `arch.OnDismissed`, `code.MarkMerged`,
+  `code.OnDismissed`, and `code.Cleanup` never race each other.
+- Cross-queue safety: `code.Cleanup` and `arch.Archive` consult the
+  per-package `IsInFlight` map and skip the workspace `RemoveAll`
+  when the LLM-side `Run` for that key is still active. The next
+  `Run`'s pre-clone `RemoveAll` handles eventual cleanup.
+- `server.queue_size` is a **soft cap** on pending rows, applied
+  per queue (a flooded ops backlog can't starve LLM enqueues).
 - Stale enqueues are safe: each agent entry re-reads the DB row and
   no-ops if the ticket is already terminal or in a compatible phase.
 - On daemon start, any row stuck in `running` (the previous process
@@ -237,21 +251,21 @@ handler ──► webhook.Enqueue(kind, name, payload)
   context marks each row `done`/`failed` even if the shutdown ctx
   has fired.
 - Completed rows stay in `webhook_jobs` as history:
-  `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;` gives a
-  live view of the queue.
+  `SELECT queue, status, count(*) FROM webhook_jobs GROUP BY 1, 2;`
+  gives a live view of both queues.
 
 ## Call-chain summary
 
-| Trigger | Path |
-|---|---|
-| Parent assigned to architect | `POST /webhook/jira` → `webhook.Enqueue` → `arch.Run` |
-| Sub-task assigned to developer | `POST /webhook/jira` → `webhook.Enqueue` → `code.Run` |
-| Sub-task transitions to DONE | `POST /webhook/jira` → `webhook.Enqueue` → `arch.AdvanceWave` |
-| Sub-task transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `code.OnDismissed` + `arch.AdvanceWave` |
-| Parent transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `arch.OnDismissed` |
-| PR merged | `POST /webhook/github` → `webhook.Enqueue` → `code.MarkMerged` |
-| CI failed on any PR | `POST /webhook/github` (`workflow_run` with `pull_requests`) → `webhook.Enqueue` → `code.Iterate` |
-| `/velocity` comment on any PR | `POST /webhook/github` (`issue_comment`) → `webhook.Enqueue` → `code.Iterate` |
+| Trigger | Path | Queue |
+|---|---|---|
+| Parent assigned to architect | `POST /webhook/jira` → `webhook.Enqueue` → `arch.Run` → enqueues `arch.AssignWave(0)` | llm → ops |
+| Sub-task assigned to developer | `POST /webhook/jira` → `webhook.Enqueue` → `code.Run` | llm |
+| Sub-task transitions to DONE | `POST /webhook/jira` → `webhook.Enqueue` → `arch.AdvanceWave` → enqueues `arch.AssignWave(N)` or `arch.Archive` | ops |
+| Sub-task transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `code.OnDismissed` → enqueues `code.Cleanup` + `arch.AdvanceWave` | ops |
+| Parent transitions to DONE via "Dismissed" alias | `POST /webhook/jira` → `webhook.Enqueue` → `arch.OnDismissed` | ops |
+| PR merged | `POST /webhook/github` → `webhook.Enqueue` → `code.MarkMerged` → enqueues `code.Cleanup` | ops |
+| CI failed on any PR | `POST /webhook/github` (`workflow_run` with `pull_requests`) → `webhook.Enqueue` → `code.Iterate` | llm |
+| `/velocity` comment on any PR | `POST /webhook/github` (`issue_comment`) → `webhook.Enqueue` → `code.Iterate` | llm |
 
 All cross-component communication — including arch→code — goes via
 Jira (assignment, transition) or GitHub (PR events). Never via

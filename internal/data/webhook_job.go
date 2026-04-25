@@ -18,6 +18,7 @@ const (
 // dispatcher; `Payload` carries the JSON-encoded args for that kind.
 type WebhookJob struct {
 	ID          int64            `json:"id"`
+	Queue       string           `json:"queue"`
 	Kind        string           `json:"kind"`
 	Name        string           `json:"name,omitempty"`
 	Payload     json.RawMessage  `json:"payload"`

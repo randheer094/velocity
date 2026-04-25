@@ -54,16 +54,17 @@ func restoreVars(t *testing.T) {
 
 // fakeInsert records what Enqueue wrote. Callers read Names()/Kinds().
 type fakeInsert struct {
-	mu    sync.Mutex
-	kinds []string
-	names []string
+	mu     sync.Mutex
+	queues []string
+	kinds  []string
+	names  []string
 	// payloads can be inspected by the rare test that cares.
 	payloads []json.RawMessage
 	nextID   int64
 	err      error
 }
 
-func (f *fakeInsert) Fn(_ context.Context, kind, name string, payload any) (int64, error) {
+func (f *fakeInsert) Fn(_ context.Context, queue, kind, name string, payload any) (int64, error) {
 	if f.err != nil {
 		return 0, f.err
 	}
@@ -73,11 +74,20 @@ func (f *fakeInsert) Fn(_ context.Context, kind, name string, payload any) (int6
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.queues = append(f.queues, queue)
 	f.kinds = append(f.kinds, kind)
 	f.names = append(f.names, name)
 	f.payloads = append(f.payloads, raw)
 	f.nextID++
 	return f.nextID, nil
+}
+
+func (f *fakeInsert) Queues() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.queues))
+	copy(out, f.queues)
+	return out
 }
 
 func (f *fakeInsert) Names() []string {
@@ -100,7 +110,7 @@ func installCapture(t *testing.T) *fakeInsert {
 
 	fi := &fakeInsert{}
 	insertJob = fi.Fn
-	countPend = func(context.Context) (int, error) { return 0, nil }
+	countPend = func(context.Context, string) (int, error) { return 0, nil }
 
 	queueMu.Lock()
 	queueStart = true
@@ -126,8 +136,8 @@ func installRunning(t *testing.T) *fakeInsert {
 	var pumpMu sync.Mutex
 	pumped := map[int]bool{}
 	origFn := fi.Fn
-	insertJob = func(ctx context.Context, kind, name string, payload any) (int64, error) {
-		id, err := origFn(ctx, kind, name, payload)
+	insertJob = func(ctx context.Context, queue, kind, name string, payload any) (int64, error) {
+		id, err := origFn(ctx, queue, kind, name, payload)
 		if err != nil {
 			return id, err
 		}
@@ -162,7 +172,7 @@ func TestStartIsIdempotent(t *testing.T) {
 	defer resetQueue()
 
 	resetRun = func(context.Context) (int64, error) { return 0, nil }
-	claimJob = func(context.Context) (*data.WebhookJob, error) { return nil, nil }
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) { return nil, nil }
 
 	Start(context.Background(), 1, 4)
 	queueMu.Lock()
@@ -185,7 +195,7 @@ func TestStartDefaultsCorrectMinima(t *testing.T) {
 	defer resetQueue()
 
 	resetRun = func(context.Context) (int64, error) { return 0, nil }
-	claimJob = func(context.Context) (*data.WebhookJob, error) { return nil, nil }
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) { return nil, nil }
 
 	Start(context.Background(), 0, 0)
 	queueMu.Lock()
@@ -206,7 +216,7 @@ func TestStartReclaimsRunningRows(t *testing.T) {
 		atomic.StoreInt32(&resetCalled, 1)
 		return 3, nil
 	}
-	claimJob = func(context.Context) (*data.WebhookJob, error) { return nil, nil }
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) { return nil, nil }
 
 	Start(context.Background(), 1, 4)
 	if atomic.LoadInt32(&resetCalled) != 1 {
@@ -220,7 +230,7 @@ func TestStartReclaimError(t *testing.T) {
 	defer resetQueue()
 
 	resetRun = func(context.Context) (int64, error) { return 0, errors.New("db down") }
-	claimJob = func(context.Context) (*data.WebhookJob, error) { return nil, nil }
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) { return nil, nil }
 
 	// Must not panic even on reset error.
 	Start(context.Background(), 1, 4)
@@ -241,7 +251,7 @@ func TestEnqueueDropsOnSoftCap(t *testing.T) {
 
 	fi := &fakeInsert{}
 	insertJob = fi.Fn
-	countPend = func(context.Context) (int, error) { return 10, nil }
+	countPend = func(context.Context, string) (int, error) { return 10, nil }
 
 	queueMu.Lock()
 	queueStart = true
@@ -261,7 +271,7 @@ func TestEnqueueInsertError(t *testing.T) {
 
 	fi := &fakeInsert{err: errors.New("db down")}
 	insertJob = fi.Fn
-	countPend = func(context.Context) (int, error) { return 0, nil }
+	countPend = func(context.Context, string) (int, error) { return 0, nil }
 
 	queueMu.Lock()
 	queueStart = true
@@ -280,7 +290,7 @@ func TestEnqueueCountError(t *testing.T) {
 	fi := &fakeInsert{}
 	insertJob = fi.Fn
 	// Count error should not block — Enqueue proceeds with insert.
-	countPend = func(context.Context) (int, error) { return 0, errors.New("count fail") }
+	countPend = func(context.Context, string) (int, error) { return 0, errors.New("count fail") }
 
 	queueMu.Lock()
 	queueStart = true
@@ -300,7 +310,7 @@ func TestPollLoopRunsClaimedJob(t *testing.T) {
 
 	// Serve exactly one job then return nil forever.
 	var served int32
-	claimJob = func(context.Context) (*data.WebhookJob, error) {
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) {
 		if atomic.AddInt32(&served, 1) == 1 {
 			return &data.WebhookJob{
 				ID:      7,
@@ -343,7 +353,7 @@ func TestPollLoopMarksFailedOnDispatchErr(t *testing.T) {
 	defer resetQueue()
 
 	var served int32
-	claimJob = func(context.Context) (*data.WebhookJob, error) {
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) {
 		if atomic.AddInt32(&served, 1) == 1 {
 			return &data.WebhookJob{ID: 8, Kind: "k", Payload: json.RawMessage(`{}`)}, nil
 		}
@@ -376,7 +386,7 @@ func TestPollLoopRecoversPanic(t *testing.T) {
 	defer resetQueue()
 
 	var served int32
-	claimJob = func(context.Context) (*data.WebhookJob, error) {
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) {
 		if atomic.AddInt32(&served, 1) == 1 {
 			return &data.WebhookJob{ID: 9, Kind: "k", Payload: json.RawMessage(`{}`)}, nil
 		}
@@ -406,7 +416,7 @@ func TestPollLoopClaimErrBackoff(t *testing.T) {
 	defer resetQueue()
 
 	var served int32
-	claimJob = func(context.Context) (*data.WebhookJob, error) {
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) {
 		n := atomic.AddInt32(&served, 1)
 		if n <= 2 {
 			return nil, errors.New("transient")
@@ -432,7 +442,7 @@ func TestDrainStops(t *testing.T) {
 	restoreVars(t)
 	resetQueue()
 
-	claimJob = func(context.Context) (*data.WebhookJob, error) { return nil, nil }
+	claimJob = func(context.Context, string) (*data.WebhookJob, error) { return nil, nil }
 	resetRun = func(context.Context) (int64, error) { return 0, nil }
 
 	Start(context.Background(), 1, 1)
@@ -484,4 +494,81 @@ func waitForCond(t *testing.T, d time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for condition")
+}
+
+// TestStartSpawnsLLMAndOpsPolls boots both pools and checks each
+// queue is polled at least once. The fake claimer records the queue
+// arg every time a worker calls it.
+func TestStartSpawnsLLMAndOpsPolls(t *testing.T) {
+	restoreVars(t)
+	resetQueue()
+	defer resetQueue()
+
+	var seenMu sync.Mutex
+	seen := map[string]bool{}
+	claimJob = func(_ context.Context, queue string) (*data.WebhookJob, error) {
+		seenMu.Lock()
+		seen[queue] = true
+		seenMu.Unlock()
+		return nil, nil
+	}
+	resetRun = func(context.Context) (int64, error) { return 0, nil }
+
+	Start(context.Background(), 2, 4)
+	defer resetQueue()
+
+	waitForCond(t, 2*time.Second, func() bool {
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		return seen[QueueLLM] && seen[QueueOps]
+	})
+}
+
+// TestEnqueueRoutesByKind asserts a known LLM kind ends up on the
+// LLM queue and an ops kind ends up on the ops queue.
+func TestEnqueueRoutesByKind(t *testing.T) {
+	fi := installCapture(t)
+
+	Enqueue(KindArchRun, "arch.Run:PROJ-1", map[string]string{"key": "PROJ-1"})
+	Enqueue(KindCodeMarkMerged, "code.MarkMerged:SUB-1", map[string]string{"branch": "SUB-1"})
+
+	queues := fi.Queues()
+	if len(queues) != 2 {
+		t.Fatalf("queues: %v", queues)
+	}
+	if queues[0] != QueueLLM {
+		t.Errorf("first enqueue queue = %q, want %q", queues[0], QueueLLM)
+	}
+	if queues[1] != QueueOps {
+		t.Errorf("second enqueue queue = %q, want %q", queues[1], QueueOps)
+	}
+}
+
+// TestEnqueueSoftCapPerQueue asserts an over-cap ops queue does not
+// block LLM enqueues.
+func TestEnqueueSoftCapPerQueue(t *testing.T) {
+	restoreVars(t)
+	resetQueue()
+	defer resetQueue()
+
+	fi := &fakeInsert{}
+	insertJob = fi.Fn
+	countPend = func(_ context.Context, queue string) (int, error) {
+		if queue == QueueOps {
+			return 999, nil // saturated
+		}
+		return 0, nil
+	}
+
+	queueMu.Lock()
+	queueStart = true
+	queueSoftCap = 5
+	queueMu.Unlock()
+
+	Enqueue(KindCodeMarkMerged, "code.MarkMerged:X", map[string]string{}) // ops, dropped
+	Enqueue(KindArchRun, "arch.Run:Y", map[string]string{})                // llm, accepted
+
+	if got := fi.Names(); len(got) != 1 || got[0] != "arch.Run:Y" {
+		t.Errorf("expected only LLM enqueue to land, got %v", got)
+	}
 }

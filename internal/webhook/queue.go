@@ -10,11 +10,11 @@ import (
 )
 
 var (
-	queueMu     sync.Mutex
-	queueStart  bool
-	pollCtx     context.Context
-	pollCancel  context.CancelFunc
-	workerWg    sync.WaitGroup
+	queueMu      sync.Mutex
+	queueStart   bool
+	pollCtx      context.Context
+	pollCancel   context.CancelFunc
+	workerWg     sync.WaitGroup
 	queueSoftCap int
 )
 
@@ -22,6 +22,11 @@ var (
 // empty. Short enough that a freshly-inserted job runs quickly; long
 // enough that an idle daemon doesn't hammer Postgres.
 const pollInterval = 500 * time.Millisecond
+
+// opsWorkers is the hard-coded concurrency for the ops queue. The ops
+// queue carries short DB/Jira/GitHub steps plus workspace cleanup;
+// serializing to one worker removes ops-vs-ops races by construction.
+const opsWorkers = 1
 
 // Insertion + claim helpers are vars so tests can stub them without a
 // live Postgres. Production wiring lives in internal/db.
@@ -34,16 +39,26 @@ var (
 	countPend = db.CountPendingWebhookJobs
 )
 
-// Start boots the DB-backed queue. Call once from server.Run after
+// Start boots the DB-backed queues. Call once from server.Run after
 // db.Start. Idempotent: the second call is a no-op.
 //
-// On the first call we reset any stale `running` rows to `pending` —
-// those came from a previous daemon that died mid-job, and are safe
-// to replay because every agent entry re-reads DB state and no-ops
-// when the ticket is already terminal.
-func Start(ctx context.Context, workers, queueSize int) {
-	if workers < 1 {
-		workers = 1
+// Two pools run side by side:
+//
+//   - LLM queue: llmWorkers goroutines (cfg.Server.MaxConcurrency).
+//     Carries arch.Run, code.Run, code.Iterate.
+//   - Ops queue: exactly one goroutine. Carries every other kind —
+//     short DB/Jira/GitHub steps and workspace cleanup.
+//
+// The soft cap applies per queue so a flooded ops backlog can't
+// starve LLM enqueues.
+//
+// On first call we reset any stale `running` rows to `pending` across
+// both queues — those came from a previous daemon that died mid-job,
+// and are safe to replay because every agent entry re-reads DB state
+// and no-ops when the ticket is already terminal.
+func Start(ctx context.Context, llmWorkers, queueSize int) {
+	if llmWorkers < 1 {
+		llmWorkers = 1
 	}
 	if queueSize < 1 {
 		queueSize = 1
@@ -65,16 +80,21 @@ func Start(ctx context.Context, workers, queueSize int) {
 		slog.Warn("workqueue: reclaimed interrupted jobs", "count", n)
 	}
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < llmWorkers; i++ {
 		workerWg.Add(1)
-		go pollLoop(pollCtx)
+		go pollLoop(pollCtx, QueueLLM)
 	}
-	slog.Info("workqueue started", "workers", workers, "soft_cap", queueSize)
+	for i := 0; i < opsWorkers; i++ {
+		workerWg.Add(1)
+		go pollLoop(pollCtx, QueueOps)
+	}
+	slog.Info("workqueue started",
+		"llm_workers", llmWorkers, "ops_workers", opsWorkers, "soft_cap", queueSize)
 }
 
-// Enqueue persists a job row. Drops + logs when the pending backlog
-// exceeds the soft cap, preserving the "never block the webhook
-// handler" contract.
+// Enqueue persists a job row on the queue implied by its kind. Drops +
+// logs when the pending backlog for that queue exceeds the soft cap,
+// preserving the "never block the webhook handler" contract.
 func Enqueue(kind, name string, payload any) {
 	queueMu.Lock()
 	started := queueStart
@@ -85,22 +105,26 @@ func Enqueue(kind, name string, payload any) {
 		return
 	}
 
+	queue := QueueForKind(kind)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if cap > 0 {
-		if pending, err := countPend(ctx); err == nil && pending >= cap {
-			slog.Error("workqueue full, dropping job", "kind", kind, "name", name, "pending", pending, "cap", cap)
+		if pending, err := countPend(ctx, queue); err == nil && pending >= cap {
+			slog.Error("workqueue full, dropping job",
+				"queue", queue, "kind", kind, "name", name,
+				"pending", pending, "cap", cap)
 			return
 		}
 	}
 
-	id, err := insertJob(ctx, kind, name, payload)
+	id, err := insertJob(ctx, queue, kind, name, payload)
 	if err != nil {
-		slog.Error("workqueue: insert failed", "kind", kind, "name", name, "err", err)
+		slog.Error("workqueue: insert failed", "queue", queue, "kind", kind, "name", name, "err", err)
 		return
 	}
-	slog.Info("workqueue: enqueued", "id", id, "kind", kind, "name", name)
+	slog.Info("workqueue: enqueued", "id", id, "queue", queue, "kind", kind, "name", name)
 }
 
 // Drain cancels the pollers and waits for in-flight jobs. Returns
@@ -128,18 +152,18 @@ func Drain(ctx context.Context) {
 	}
 }
 
-func pollLoop(ctx context.Context) {
+func pollLoop(ctx context.Context, queue string) {
 	defer workerWg.Done()
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		job, err := claimJob(ctx)
+		job, err := claimJob(ctx, queue)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Error("workqueue: claim failed", "err", err)
+			slog.Error("workqueue: claim failed", "queue", queue, "err", err)
 			sleepCtx(ctx, pollInterval)
 			continue
 		}
