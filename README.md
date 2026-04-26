@@ -213,7 +213,7 @@ directory (default `~/.velocity`).
 | `velocity logs` | Print `~/.velocity/daemon.log`. |
 | `velocity logs -f` | Tail the log. |
 | `velocity check <path>` | Report whether a project has the files velocity expects. |
-| `velocity prepare <path>` | Install `CLAUDE.md` and the `prepare-for-pr` skill (Go / Android). |
+| `velocity prepare <path>` | Install `CLAUDE.md` and the `prepare-for-pr` skill (Go / Android), pulled from [velocity-resources](https://github.com/randheer094/velocity-resources). |
 | `velocity prepare <path> --force` | Overwrite existing files when preparing. |
 | `velocity --dir <path>` | Target an alternate data directory. |
 
@@ -265,52 +265,25 @@ Hint: run `velocity prepare /abs/path/my-repo` to install the missing pieces.
 
 ### `velocity prepare PROJECTPATH`
 
-Detects the project type and writes a starter set of templates,
-all under `.claude/`:
+Detects the project type, downloads the matching `<type>/` subtree
+from [velocity-resources](https://github.com/randheer094/velocity-resources),
+and writes it under `.claude/` at the project root. The resources
+repo is the source of truth for what gets installed — `velocity`
+does not bundle its own copies. To pin a non-default ref (branch or
+tag), set `VELOCITY_RESOURCES_REF` (default `main`).
 
-```
-.claude/
-├── CLAUDE.md                                  # high-level index for Claude
-├── rules/conventions.md                       # project conventions to migrate to
-└── skills/prepare-for-pr/SKILL.md             # pre-PR gate checklist
-```
-
-Contents per project type:
-
-- **Go** — `.claude/CLAUDE.md` lists build / test / vet / fmt commands and
-  points at rules. `conventions.md` covers errors (`%w` wrapping,
-  `errors.Is`), concurrency (`context.Context` first, no fire-and-
-  forget goroutines, race detector), logging (`log/slog`),
-  configuration (env-only secrets), dependencies (`go mod tidy`,
-  minimal `go.mod`), testing (table-driven, ≥90% coverage), security
-  (parameterised SQL, `crypto/subtle`), code style, and layout
-  (`cmd/` / `internal/` / `pkg/`). `SKILL.md` runs `gofmt`,
-  `go vet`, lint, `go build`, `go mod tidy`, `go test`,
-  `go test -race`, the DB/integration harness if present, and a
-  coverage spot-check before the diff review.
-- **Android** — `.claude/CLAUDE.md` lists the Gradle build / test commands
-  and points at rules. `conventions.md` covers MVI (State / Intent /
-  Effect / pure `reduce`), Hilt for DI (entry points, modules,
-  scopes, test-time `@UninstallModules`), the mandatory
-  unit + E2E test split, code style, and module layout. `SKILL.md`
-  drives the agent-focused
-  [`android` CLI](https://developer.android.com/tools/agents/android-cli)
-  (`android analyze`, `android sdk install`, `android avd create`,
-  `android emulator`, `android skills`) to provision AVDs, then
-  runs `./gradlew` for `assembleDebug`, `test`, `lint`, `detekt` /
-  `ktlintCheck`, and the mandatory `connectedAndroidTest`. Also
-  documents `./gradlew check connectedCheck` as a one-shot entry
-  point.
-
-Conventions in `conventions.md` are what the project migrates **to**
-after onboarding; they're not enforced by `velocity check`. Once a
-team adopts them, the `prepare-for-pr` skill assumes the code on
-disk already follows them.
+The installed layout follows the resources repo: a `CLAUDE.md`
+index, a set of topic files under `.claude/rules/`, and the
+`prepare-for-pr` skill under `.claude/skills/`. Conventions are
+what the project migrates **to** after onboarding; they're not
+enforced by `velocity check`. Once a team adopts them, the
+`prepare-for-pr` skill assumes the code on disk already follows
+them.
 
 `prepare` is safe to re-run: files that already exist are skipped.
 Pass `--force` to overwrite them. Projects that match neither Go nor
 Android are rejected — author those files by hand, or open an issue
-to request a template.
+on velocity-resources to request a new project type.
 
 ## Configuration reference
 
