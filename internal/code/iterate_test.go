@@ -33,12 +33,12 @@ func TestParsePRURL(t *testing.T) {
 		repo string
 		num  int
 	}{
-		"https://github.com/o/r/pull/42": {"o/r", 42},
-		"http://github.com/o/r/pull/1":   {"o/r", 1},
-		"https://github.com/o/r":         {"", 0},
+		"https://github.com/o/r/pull/42":  {"o/r", 42},
+		"http://github.com/o/r/pull/1":    {"o/r", 1},
+		"https://github.com/o/r":          {"", 0},
 		"https://github.com/o/r/issues/1": {"", 0},
-		"not-a-url":                      {"", 0},
-		"https://github.com/o/r/pull/x":  {"", 0},
+		"not-a-url":                       {"", 0},
+		"https://github.com/o/r/pull/x":   {"", 0},
 	}
 	for in, want := range cases {
 		r, n := parsePRURL(in)

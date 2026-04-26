@@ -122,16 +122,16 @@ func TestNormalizeRepoSlug(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		"randheer094/velocity-resources":                       {"randheer094/velocity-resources", true},
-		"https://github.com/randheer094/velocity-resources":    {"randheer094/velocity-resources", true},
-		"http://github.com/randheer094/velocity-resources":     {"randheer094/velocity-resources", true},
-		"github.com/randheer094/velocity-resources":            {"randheer094/velocity-resources", true},
-		"randheer094/velocity-resources.git":                   {"randheer094/velocity-resources", true},
-		"randheer094/velocity-resources/":                      {"randheer094/velocity-resources", true},
-		"":                                                     {"", false},
-		"only-one-slash":                                       {"", false},
-		"a/b/c":                                                {"", false},
-		"   randheer094/velocity-resources   ":                 {"randheer094/velocity-resources", true},
+		"randheer094/velocity-resources":                    {"randheer094/velocity-resources", true},
+		"https://github.com/randheer094/velocity-resources": {"randheer094/velocity-resources", true},
+		"http://github.com/randheer094/velocity-resources":  {"randheer094/velocity-resources", true},
+		"github.com/randheer094/velocity-resources":         {"randheer094/velocity-resources", true},
+		"randheer094/velocity-resources.git":                {"randheer094/velocity-resources", true},
+		"randheer094/velocity-resources/":                   {"randheer094/velocity-resources", true},
+		"":                                                  {"", false},
+		"only-one-slash":                                    {"", false},
+		"a/b/c":                                             {"", false},
+		"   randheer094/velocity-resources   ":              {"randheer094/velocity-resources", true},
 	}
 	for in, tc := range cases {
 		got, err := normalizeRepoSlug(in)
@@ -292,6 +292,41 @@ func TestSetupEmptyVersionAfterPrompt(t *testing.T) {
 	err := cmd.RunE(cmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "version is required") {
 		t.Fatalf("expected version-required, got %v", err)
+	}
+}
+
+// TestSetupAcceptsPipedMultiLineInput exercises the path where both
+// prompts read from one piped stdin in a single chunk. Constructing a
+// fresh bufio.Reader per prompt would discard the second line; this
+// test locks down the shared-reader fix.
+func TestSetupAcceptsPipedMultiLineInput(t *testing.T) {
+	repoSlug := "owner/velocity-resources"
+	tag := "v0.6.0"
+	startReleaseServer(t, repoSlug, tag, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: []\n",
+		"prompts/a.md":          "x",
+	}, "")
+	seedConfigForSetup(t)
+
+	cmd := newSetupCmd()
+	cmd.SetContext(context.Background())
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	// Both prompts arrive in one chunk — the second line would be
+	// lost if promptString constructed its own bufio.Reader per call.
+	cmd.SetIn(strings.NewReader(repoSlug + "\n" + tag + "\n"))
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if err := config.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Get()
+	if cfg.Resources.RepoSlug != repoSlug {
+		t.Errorf("RepoSlug = %q, want %q", cfg.Resources.RepoSlug, repoSlug)
+	}
+	if cfg.Resources.Version != tag {
+		t.Errorf("Version = %q, want %q", cfg.Resources.Version, tag)
 	}
 }
 

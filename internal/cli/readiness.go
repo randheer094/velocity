@@ -217,4 +217,3 @@ func resolveProjectPath(raw string) (string, error) {
 	}
 	return abs, nil
 }
-

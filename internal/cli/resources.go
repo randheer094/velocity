@@ -76,4 +76,3 @@ func installTemplates(root string, entries []templateEntry, force bool) (written
 	}
 	return written, skipped, nil
 }
-

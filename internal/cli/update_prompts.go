@@ -34,6 +34,8 @@ func newUpdatePromptsCmd() *cobra.Command {
 				ctx = context.Background()
 			}
 
+			resources.SetTimeout(cfg.Resources.FetchTimeoutSec)
+
 			tag := ""
 			if len(args) == 1 {
 				tag = strings.TrimSpace(args[0])

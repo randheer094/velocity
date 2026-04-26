@@ -77,13 +77,13 @@ func TestMajorOf(t *testing.T) {
 		want int
 		ok   bool
 	}{
-		"v0.6.0":   {0, true},
-		"0.6.0":    {0, true},
-		"v1.0.0":   {1, true},
-		"v10.2.3":  {10, true},
-		"":         {0, false},
-		"abc":      {0, false},
-		"v":        {0, false},
+		"v0.6.0":  {0, true},
+		"0.6.0":   {0, true},
+		"v1.0.0":  {1, true},
+		"v10.2.3": {10, true},
+		"":        {0, false},
+		"abc":     {0, false},
+		"v":       {0, false},
 	}
 	for in, tc := range cases {
 		got, err := MajorOf(in)
@@ -244,6 +244,32 @@ func TestInstallPreservesExistingWhenDownloadFails(t *testing.T) {
 // TestInstallPreservesExistingWhenExtractFails covers the case where
 // download + sha verify succeed but extract fails (corrupt tarball or
 // unsafe path inside).
+func TestInstallRejectsTarballWithoutManifest(t *testing.T) {
+	// A tarball that extracts cleanly but doesn't carry
+	// prompts/manifest.yaml must not replace an existing cache.
+	repo := "owner/repo"
+	tag := "v0.6.0"
+	files := map[string]string{
+		"go/.claude/CLAUDE.md": "go!", // no prompts/manifest.yaml
+	}
+	startReleaseServer(t, repo, tag, files, "")
+
+	dst := filepath.Join(t.TempDir(), "resources")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "sentinel"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Install(context.Background(), Release{RepoSlug: repo, Tag: tag}, dst, 0)
+	if err == nil || !strings.Contains(err.Error(), "missing prompts/manifest.yaml") {
+		t.Fatalf("expected manifest-missing error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "sentinel")); err != nil {
+		t.Errorf("sentinel removed despite sanity-check failure: %v", err)
+	}
+}
+
 func TestInstallPreservesExistingWhenExtractFails(t *testing.T) {
 	repo := "owner/repo"
 	tag := "v0.0.0"
@@ -322,10 +348,10 @@ func TestExtractTarGzFlatLayoutNoStrip(t *testing.T) {
 	// extractTarGz takes entries at face value — sibling top-levels
 	// land where they are declared, regardless of allowlist.
 	tarball := buildTarGz(map[string]string{
-		"prompts/manifest.yaml":      "m",
-		"go/.claude/CLAUDE.md":       "g",
-		"android/.claude/CLAUDE.md":  "a",
-		"kotlin/.claude/CLAUDE.md":   "k",
+		"prompts/manifest.yaml":     "m",
+		"go/.claude/CLAUDE.md":      "g",
+		"android/.claude/CLAUDE.md": "a",
+		"kotlin/.claude/CLAUDE.md":  "k",
 	})
 	dir := t.TempDir()
 	tarPath := filepath.Join(dir, "flat.tar.gz")
@@ -355,9 +381,9 @@ func TestSafeEntryPath(t *testing.T) {
 	}{
 		{"prompts/m.yaml", "prompts/m.yaml", true},
 		{"./prompts/m.yaml", "prompts/m.yaml", true},
-		{"", "", true},               // empty
-		{"/etc/evil", "", false},     // absolute
-		{"../escape", "", false},     // traversal
+		{"", "", true},           // empty
+		{"/etc/evil", "", false}, // absolute
+		{"../escape", "", false}, // traversal
 	}
 	for _, c := range cases {
 		got, ok := safeEntryPath(c.name)

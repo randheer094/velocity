@@ -41,10 +41,10 @@ func TestLoadAndRender(t *testing.T) {
 	defer resetForTest()
 	dir := t.TempDir()
 	writeFixture(t, dir, map[string]string{
-		"VERSION":                  "v0.6.0\n",
-		"prompts/manifest.yaml":    goodManifest,
-		"prompts/arch/plan.md":     "{{.PlanBegin}}|{{.ParentKey}}|{{.Requirement}}|{{.PlanEnd}}",
-		"prompts/failure/jira.md":  "{{.Role}}: {{.Stage}}: {{.Message}}",
+		"VERSION":                 "v0.6.0\n",
+		"prompts/manifest.yaml":   goodManifest,
+		"prompts/arch/plan.md":    "{{.PlanBegin}}|{{.ParentKey}}|{{.Requirement}}|{{.PlanEnd}}",
+		"prompts/failure/jira.md": "{{.Role}}: {{.Stage}}: {{.Message}}",
 	})
 	if err := Load(dir); err != nil {
 		t.Fatalf("Load: %v", err)

@@ -21,8 +21,8 @@ import (
 // resources tarball. Version is the manifest major; this binary only
 // accepts manifests whose Version equals MajorVersion.
 type Manifest struct {
-	Version int            `yaml:"version"`
-	Prompts []PromptEntry  `yaml:"prompts"`
+	Version int           `yaml:"version"`
+	Prompts []PromptEntry `yaml:"prompts"`
 }
 
 // PromptEntry maps a logical id to a relative template path plus a
@@ -56,8 +56,9 @@ func Shared() *Store {
 
 // Load reads manifest.yaml + every referenced template file from
 // resourcesDir/prompts and installs the result as the shared store.
-// A zero-byte VERSION file beside resourcesDir is read for tag
-// reporting; missing VERSION is a non-fatal warning.
+// resourcesDir/VERSION is read for tag reporting if present; a
+// missing VERSION file is silently tolerated (the store reports an
+// empty Tag()).
 func Load(resourcesDir string) error {
 	store, err := load(resourcesDir)
 	if err != nil {

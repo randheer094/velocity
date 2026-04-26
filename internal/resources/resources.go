@@ -23,7 +23,9 @@ import (
 )
 
 var (
-	// HTTPClient is the default client; overridable in tests.
+	// HTTPClient is the default client; overridable in tests. Its
+	// Timeout is also tunable at runtime via SetTimeout (called by the
+	// CLI from cfg.Resources.FetchTimeoutSec).
 	HTTPClient = &http.Client{Timeout: 60 * time.Second}
 	// APIBase is the base URL for the GitHub REST API. Overridable in
 	// tests via SetAPIBase.
@@ -37,6 +39,17 @@ var (
 func SetAPIBase(url string) {
 	APIBase = url
 	DownloadBase = url
+}
+
+// SetTimeout sets the per-call HTTP timeout used by setup,
+// update-prompts, and LatestForMajor. Called from the CLI handlers so
+// cfg.Resources.FetchTimeoutSec is the live source of truth. A
+// non-positive value is ignored.
+func SetTimeout(seconds int) {
+	if seconds <= 0 {
+		return
+	}
+	HTTPClient.Timeout = time.Duration(seconds) * time.Second
 }
 
 // Release identifies a velocity-resources tarball.
@@ -114,9 +127,9 @@ func LatestForMajor(ctx context.Context, repoSlug string, major int) (string, er
 		return "", fmt.Errorf("list releases: status %d", resp.StatusCode)
 	}
 	var releases []struct {
-		TagName    string    `json:"tag_name"`
-		Draft      bool      `json:"draft"`
-		Prerelease bool      `json:"prerelease"`
+		TagName     string    `json:"tag_name"`
+		Draft       bool      `json:"draft"`
+		Prerelease  bool      `json:"prerelease"`
 		PublishedAt time.Time `json:"published_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
@@ -351,6 +364,13 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 		return err
 	}
 
+	// Sanity-check that the tarball produced the layout the daemon
+	// expects, before we touch destDir. A malformed release without a
+	// manifest must not silently replace a known-good cache.
+	if _, err := os.Stat(filepath.Join(stagingDir, "prompts", "manifest.yaml")); err != nil {
+		return fmt.Errorf("tarball missing prompts/manifest.yaml: %w", err)
+	}
+
 	if err := os.WriteFile(filepath.Join(stagingDir, "VERSION"), []byte(rel.Tag+"\n"), 0o644); err != nil {
 		return err
 	}
@@ -358,13 +378,24 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 		return err
 	}
 
-	// Atomic-ish swap: remove the existing dir, then rename. Rename
-	// over a non-empty dir is not portable. Note: there is a brief
-	// window where destDir does not exist; concurrent SIGHUP-driven
-	// reload will see the previous templates kept in place because
-	// prompts.Reload preserves the existing store on failure.
-	_ = os.RemoveAll(destDir)
+	// Backup-then-swap: if a previous resources dir exists, move it
+	// aside first; if the new rename fails, restore the backup so the
+	// caller never observes a missing destDir. Rename over a non-empty
+	// dir is not portable on all platforms, so we always remove first.
+	backupDir := ""
+	if _, err := os.Stat(destDir); err == nil {
+		backupDir = filepath.Join(tmpDir, "backup")
+		if err := os.Rename(destDir, backupDir); err != nil {
+			return fmt.Errorf("backup existing resources: %w", err)
+		}
+	}
 	if err := os.Rename(stagingDir, destDir); err != nil {
+		if backupDir != "" {
+			// Best-effort restore; if even this fails the operator
+			// has the previous cache in tmpDir/backup until process
+			// exit cleans tmpDir.
+			_ = os.Rename(backupDir, destDir)
+		}
 		return fmt.Errorf("install: %w", err)
 	}
 	return nil

@@ -252,12 +252,12 @@ prompts:
     path: failure/iterate_pr.md
     placeholders: [Stage, Message]
 `,
-		"prompts/code/run.md":              "subtask={{.IssueKey}} title={{.Title}} desc={{.Description}}",
-		"prompts/code/iterate.md":          "iter={{.IssueKey}} title={{.Title}} desc={{.Description}} base={{.BaseBranch}} extra={{.Extra}}",
-		"prompts/failure/jira.md":          "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
-		"prompts/failure/iterate_jira.md":  "Velocity iterate ({{.Reason}}) failed at stage {{.Stage}}: {{.Message}}",
-		"prompts/failure/iterate_pr.md":    "Velocity iterate failed at stage {{.Stage}}: {{.Message}}",
-		"VERSION":                          "v0.0.0",
+		"prompts/code/run.md":             "subtask={{.IssueKey}} title={{.Title}} desc={{.Description}}",
+		"prompts/code/iterate.md":         "iter={{.IssueKey}} title={{.Title}} desc={{.Description}} base={{.BaseBranch}} extra={{.Extra}}",
+		"prompts/failure/jira.md":         "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
+		"prompts/failure/iterate_jira.md": "Velocity iterate ({{.Reason}}) failed at stage {{.Stage}}: {{.Message}}",
+		"prompts/failure/iterate_pr.md":   "Velocity iterate failed at stage {{.Stage}}: {{.Message}}",
+		"VERSION":                         "v0.0.0",
 	}
 	for rel, body := range files {
 		full := filepath.Join(resDir, rel)

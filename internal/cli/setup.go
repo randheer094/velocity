@@ -32,7 +32,11 @@ func newSetupCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			in := cmd.InOrStdin()
+			// Build one bufio.Reader for the whole interactive flow —
+			// constructing a fresh wrapper per prompt would discard any
+			// bytes the previous wrapper had buffered, which breaks
+			// piped multi-line input (e.g. `printf "x\ny\n" | velocity setup`).
+			in := bufio.NewReader(cmd.InOrStdin())
 
 			repoSlug := strings.TrimSpace(repoFlag)
 			if repoSlug == "" {
@@ -67,6 +71,7 @@ func newSetupCmd() *cobra.Command {
 				ctx = context.Background()
 			}
 
+			resources.SetTimeout(cfg.Resources.FetchTimeoutSec)
 			fmt.Fprintf(out, "Downloading velocity-resources %s from %s\n", tag, repoSlug)
 			if err := resources.Install(ctx, resources.Release{RepoSlug: repoSlug, Tag: tag}, config.ResourcesDir(), prompts.MajorVersion); err != nil {
 				return err
@@ -107,18 +112,16 @@ func normalizeRepoSlug(s string) (string, error) {
 }
 
 // promptString writes label (with default if non-empty) and reads a
-// trimmed line from in. Empty input returns the default.
-func promptString(in io.Reader, out io.Writer, label, def string) (string, error) {
+// trimmed line from in. Empty input returns the default. The caller
+// must reuse the same *bufio.Reader across prompts so no buffered
+// bytes are dropped between calls.
+func promptString(in *bufio.Reader, out io.Writer, label, def string) (string, error) {
 	if def != "" {
 		fmt.Fprintf(out, "%s [%s]: ", label, def)
 	} else {
 		fmt.Fprintf(out, "%s: ", label)
 	}
-	br, ok := in.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReader(in)
-	}
-	line, err := br.ReadString('\n')
+	line, err := in.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -134,4 +137,3 @@ func promptString(in io.Reader, out io.Writer, label, def string) (string, error
 	}
 	return line, nil
 }
-
