@@ -5,7 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/randheer094/velocity/internal/version"
 )
+
+// velocityMajor returns version.Major behind a function so the test
+// helper isn't a compile-time-substituted constant — guards against
+// the test being a tautology if the linker ever optimised it out.
+func velocityMajor() int { return version.Major }
 
 const goodManifest = `version: 0
 prompts:
@@ -200,6 +207,16 @@ func TestStoreRenderNil(t *testing.T) {
 	var s *Store
 	if _, err := s.Render("a", nil); err == nil {
 		t.Fatal("expected nil-store error")
+	}
+}
+
+func TestMajorVersionTracksVelocityMajor(t *testing.T) {
+	// The manifest schema major is pinned to the velocity binary's
+	// major version. If they ever drift, setup/update-prompts will
+	// reject every release of velocity-resources for nonsensical
+	// reasons. Catch the drift at unit-test time.
+	if MajorVersion != velocityMajor() {
+		t.Errorf("prompts.MajorVersion (%d) != version.Major (%d)", MajorVersion, velocityMajor())
 	}
 }
 

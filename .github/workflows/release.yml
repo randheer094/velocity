@@ -8,8 +8,26 @@ permissions:
   contents: write
 
 jobs:
+  check-major:
+    name: Verify release tag matches version.Major
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Compare tag major to version.Major
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: ./scripts/check-major.sh "$RELEASE_TAG"
+
   build:
     name: Build ${{ matrix.asset }}
+    needs: check-major
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +52,11 @@ jobs:
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -ldflags="-s -w" -o ${{ matrix.asset }} ./cmd/velocity
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          go build \
+            -ldflags="-s -w -X github.com/randheer094/velocity/internal/version.Tag=$RELEASE_TAG" \
+            -o ${{ matrix.asset }} ./cmd/velocity
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2

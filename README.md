@@ -204,6 +204,7 @@ directory (default `~/.velocity`).
 
 | Command | Description |
 |---|---|
+| `velocity version` | Print the binary version (e.g. `velocity v0.6.0 (manifest major 0)`). |
 | `velocity config` | Print the current `config.yaml` to stdout. |
 | `velocity setup` | Download the velocity-resources release tarball into `~/.velocity/resources/` and pin the repo + version in `config.yaml`. Required once before `start`. |
 | `velocity update-prompts [tag]` | Refresh `~/.velocity/resources/` from the configured repo. Without a tag, picks the newest release whose major matches this binary. Sends SIGHUP to a running daemon for live reload. |
@@ -307,9 +308,12 @@ Pinned randheer094/velocity-resources@v0.6.0 in /home/you/.velocity/config.yaml
 from the release page, verifies the tarball checksum, extracts to
 `~/.velocity/resources/`, and persists the repo slug + tag under
 `resources:` in `config.yaml`. The major version of the tag must
-match the binary's compile-time `prompts.MajorVersion`; major
-mismatches (e.g. installing `v1.x` into a binary that supports
+match the velocity binary's major (`velocity version` prints it);
+major mismatches (e.g. installing `v1.x` into a binary that supports
 `v0.x`) are rejected with `major mismatch: binary expects 0, requested 1`.
+The release-binary CI also gates on this — a `vX.Y.Z` release tag
+whose major doesn't match the source-code `version.Major` constant
+fails the release build.
 
 To upgrade or pin a different tag once the cache exists, use
 `velocity update-prompts`. Without an argument it queries the
