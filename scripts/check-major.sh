@@ -14,6 +14,15 @@ if [ "$#" -ne 1 ]; then
 fi
 TAG="$1"
 
+# Canonical release tag shape: vMAJOR.MINOR.PATCH, e.g. v0.6.0.
+# Pre-release / build metadata suffixes are allowed
+# (e.g. v0.6.0-rc1, v0.6.0+build.1).
+if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+  echo "check-major: tag $TAG does not match the canonical vMAJOR.MINOR.PATCH format" >&2
+  echo "             expected e.g. v0.6.0, v0.6.0-rc1, v1.2.3+build.4" >&2
+  exit 1
+fi
+
 # Extract version.Major from internal/version/version.go. The constant
 # is on a single line: `const Major = N`.
 SRC_MAJOR=$(grep -E '^const Major = [0-9]+$' internal/version/version.go | awk '{print $4}')
@@ -22,13 +31,9 @@ if [ -z "${SRC_MAJOR:-}" ]; then
   exit 1
 fi
 
-# Strip optional leading "v" then take the leading numeric component.
+# Take the leading numeric component after stripping the "v".
 TAG_TRIM="${TAG#v}"
 TAG_MAJOR="${TAG_TRIM%%.*}"
-if ! [[ "$TAG_MAJOR" =~ ^[0-9]+$ ]]; then
-  echo "check-major: tag $TAG does not start with a numeric major" >&2
-  exit 1
-fi
 
 if [ "$TAG_MAJOR" != "$SRC_MAJOR" ]; then
   echo "check-major: release tag $TAG (major $TAG_MAJOR) does not match version.Major=$SRC_MAJOR" >&2

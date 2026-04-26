@@ -16,10 +16,11 @@ import (
 const Major = 0
 
 // Tag is the human-readable build tag, e.g. "v0.6.0". It is set via
-// -ldflags at release time; dev builds report "dev".
+// -ldflags at release time; the default below is the current release
+// so a binary built without ldflags still reports a sensible value.
 //
 //	go build -ldflags="-X github.com/randheer094/velocity/internal/version.Tag=v0.6.0" ./cmd/velocity
-var Tag = "dev"
+var Tag = "v0.6.0"
 
 // String returns the version string printed by `velocity version`.
 func String() string {
