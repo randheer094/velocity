@@ -68,7 +68,6 @@ func writeValidConfig(t *testing.T) {
 	}
 }
 
-
 func TestNewRootCmd(t *testing.T) {
 	root := NewRootCmd()
 	if root.Use != "velocity" {

@@ -1,20 +1,15 @@
 package cli
 
 import (
-	"embed"
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
-
-//go:embed all:templates
-var readinessTemplates embed.FS
 
 type projectType string
 
@@ -31,16 +26,16 @@ const (
 )
 
 type readinessReport struct {
-	root        string
-	projectType projectType
-	claudeMd    checkResult
-	claudeDir   checkResult
+	root         string
+	projectType  projectType
+	claudeMd     checkResult
+	claudeDir    checkResult
 	prepareSkill checkResult
 }
 
 type checkResult struct {
-	name string
-	ok   bool
+	name   string
+	ok     bool
 	detail string
 }
 
@@ -167,7 +162,7 @@ func newPrepareCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "prepare PROJECTPATH",
-		Short: "Install CLAUDE.md and the prepare-for-pr skill (Go / Android)",
+		Short: "Install CLAUDE.md and the prepare-for-pr skill from velocity-resources (Go / Android)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectPath(args[0])
@@ -179,8 +174,18 @@ func newPrepareCmd() *cobra.Command {
 				return fmt.Errorf("unsupported project: %s has neither go.mod nor build.gradle[.kts]; prepare currently supports Go and Android", root)
 			}
 			out := cmd.OutOrStdout()
+			ref := resourcesRef()
 			fmt.Fprintf(out, "Detected %s project at %s\n", pt, root)
-			written, skipped, err := installTemplates(root, pt, force)
+			fmt.Fprintf(out, "Fetching templates from %s@%s\n", resourcesRepo, ref)
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			entries, err := fetchTemplates(ctx, pt, ref)
+			if err != nil {
+				return err
+			}
+			written, skipped, err := installTemplates(root, entries, force)
 			if err != nil {
 				return err
 			}
@@ -217,36 +222,20 @@ func resolveProjectPath(raw string) (string, error) {
 	return abs, nil
 }
 
-func installTemplates(root string, pt projectType, force bool) (written, skipped []string, err error) {
-	templateRoot := filepath.ToSlash(filepath.Join("templates", string(pt)))
-	err = fs.WalkDir(readinessTemplates, templateRoot, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(path, templateRoot+"/")
-		dst := filepath.Join(root, filepath.FromSlash(rel))
+func installTemplates(root string, entries []templateEntry, force bool) (written, skipped []string, err error) {
+	for _, e := range entries {
+		dst := filepath.Join(root, filepath.FromSlash(e.relPath))
 		if _, statErr := os.Stat(dst); statErr == nil && !force {
-			skipped = append(skipped, rel)
-			return nil
+			skipped = append(skipped, e.relPath)
+			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
+		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
+			return written, skipped, mkErr
 		}
-		data, err := readinessTemplates.ReadFile(path)
-		if err != nil {
-			return err
+		if wErr := os.WriteFile(dst, e.data, 0o644); wErr != nil {
+			return written, skipped, wErr
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			return err
-		}
-		written = append(written, rel)
-		return nil
-	})
-	if err != nil {
-		return written, skipped, err
+		written = append(written, e.relPath)
 	}
 	return written, skipped, nil
 }
