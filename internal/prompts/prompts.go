@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
+	"text/template/parse"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,7 +37,6 @@ type PromptEntry struct {
 // Store is an immutable snapshot of all parsed templates. Reload
 // builds a new Store and swaps it in atomically.
 type Store struct {
-	version   string
 	tag       string
 	templates map[string]*template.Template
 }
@@ -121,15 +122,109 @@ func load(resourcesDir string) (*Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", p.ID, err)
 		}
+		if err := checkPlaceholders(p, tpl); err != nil {
+			return nil, err
+		}
 		templates[p.ID] = tpl
 	}
 
-	tag := readVersionFile(resourcesDir)
 	return &Store{
-		version:   strings.TrimSpace(tag),
-		tag:       strings.TrimSpace(tag),
+		tag:       strings.TrimSpace(readVersionFile(resourcesDir)),
 		templates: templates,
 	}, nil
+}
+
+// checkPlaceholders verifies the manifest's declared placeholder list
+// matches the field references in the template body exactly. Mismatch
+// is a manifest authoring bug — the data structs in arch/code declare
+// fields keyed off these names, so a drift means rendering will fail
+// at runtime with missingkey=error.
+func checkPlaceholders(p PromptEntry, tpl *template.Template) error {
+	declared := map[string]bool{}
+	for _, name := range p.Placeholders {
+		declared[name] = true
+	}
+	used := map[string]bool{}
+	for _, t := range tpl.Templates() {
+		if t.Tree == nil || t.Tree.Root == nil {
+			continue
+		}
+		collectFieldNames(t.Tree.Root, used)
+	}
+
+	var missing, extra []string
+	for name := range used {
+		if !declared[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range declared {
+		if !used[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+
+	switch {
+	case len(missing) > 0 && len(extra) > 0:
+		return fmt.Errorf("manifest %s placeholders drift: template uses %v not declared, declared %v not used by template",
+			p.ID, missing, extra)
+	case len(missing) > 0:
+		return fmt.Errorf("manifest %s placeholders missing entries for: %v", p.ID, missing)
+	case len(extra) > 0:
+		return fmt.Errorf("manifest %s declares unused placeholders: %v", p.ID, extra)
+	}
+	return nil
+}
+
+func collectFieldNames(node parse.Node, out map[string]bool) {
+	if node == nil {
+		return
+	}
+	switch n := node.(type) {
+	case *parse.ListNode:
+		if n == nil {
+			return
+		}
+		for _, c := range n.Nodes {
+			collectFieldNames(c, out)
+		}
+	case *parse.ActionNode:
+		collectFieldNames(n.Pipe, out)
+	case *parse.PipeNode:
+		if n == nil {
+			return
+		}
+		for _, cmd := range n.Cmds {
+			collectFieldNames(cmd, out)
+		}
+	case *parse.CommandNode:
+		for _, arg := range n.Args {
+			collectFieldNames(arg, out)
+		}
+	case *parse.FieldNode:
+		// Only top-level field references (.Foo, not .Foo.Bar.Baz)
+		// participate in the manifest contract — sub-fields are
+		// internal to a placeholder's struct.
+		if len(n.Ident) > 0 {
+			out[n.Ident[0]] = true
+		}
+	case *parse.IfNode:
+		collectFieldNames(n.Pipe, out)
+		collectFieldNames(n.List, out)
+		collectFieldNames(n.ElseList, out)
+	case *parse.RangeNode:
+		collectFieldNames(n.Pipe, out)
+		collectFieldNames(n.List, out)
+		collectFieldNames(n.ElseList, out)
+	case *parse.WithNode:
+		collectFieldNames(n.Pipe, out)
+		collectFieldNames(n.List, out)
+		collectFieldNames(n.ElseList, out)
+	case *parse.TemplateNode:
+		collectFieldNames(n.Pipe, out)
+	}
 }
 
 func readVersionFile(resourcesDir string) string {

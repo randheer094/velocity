@@ -126,8 +126,9 @@ func promptString(in io.Reader, out io.Writer, label, def string) (string, error
 	if line == "" {
 		return def, nil
 	}
-	// Hide that we accepted a stripped slug — surface the warning so
-	// the user notices their copy-paste habit.
+	// Warn the caller when the input looks URL-shaped. The actual
+	// stripping happens in normalizeRepoSlug; this only nudges the
+	// user before we silently accept their copy-paste.
 	if strings.Contains(line, "github.com/") || strings.HasPrefix(line, "http") {
 		fmt.Fprintln(out, "  (note: stripping URL prefix — repo_slug is stored as <owner>/<repo>)")
 	}

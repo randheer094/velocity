@@ -45,6 +45,10 @@ func newUpdatePromptsCmd() *cobra.Command {
 				}
 				tag = latest
 			}
+			// CheckMajor is redundant when LatestForMajor picked the
+			// tag (which only returns matching majors), but it's the
+			// single gate for an explicit user-supplied tag — keep
+			// both branches passing through the same check.
 			if err := resources.CheckMajor(tag, prompts.MajorVersion); err != nil {
 				return err
 			}

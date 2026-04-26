@@ -76,6 +76,9 @@ func Run() error {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, syscall.SIGHUP)
+	// Loop on signal events: SIGHUP triggers an in-place prompts
+	// reload and `continue`s the loop; SIGINT/SIGTERM and a server
+	// error fall through to `break` so the shutdown sequence runs.
 	for {
 		select {
 		case sig := <-stop:

@@ -494,7 +494,7 @@ func TestNewPrepareCmdMissingCache(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err := cmd.RunE(cmd, []string{dir})
-	if err == nil || !strings.Contains(err.Error(), "Resources not installed") {
+	if err == nil || !strings.Contains(err.Error(), "resources not installed") {
 		t.Fatalf("expected setup hint, got %v", err)
 	}
 }
@@ -511,7 +511,7 @@ func TestNewPrepareCmdWrongProjectType(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err := cmd.RunE(cmd, []string{dir})
-	if err == nil || !strings.Contains(err.Error(), "Resources not installed") {
+	if err == nil || !strings.Contains(err.Error(), "resources not installed") {
 		t.Fatalf("expected missing-cache error, got %v", err)
 	}
 }

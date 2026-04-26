@@ -22,10 +22,6 @@ import (
 	"time"
 )
 
-// MajorVersionFn returns the prompt-manifest major version this binary
-// accepts. Wired to prompts.MajorVersion at the CLI seam to avoid an
-// import cycle (resources is imported by prompts.Reload? — no, but
-// keeping this package agent-agnostic keeps future imports clean).
 var (
 	// HTTPClient is the default client; overridable in tests.
 	HTTPClient = &http.Client{Timeout: 60 * time.Second}
@@ -211,9 +207,16 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// extractTarGz extracts archivePath into dst. Entries that escape dst
-// (path traversal, absolute paths) are rejected. Existing entries are
-// overwritten.
+// extractTarGz extracts archivePath into dst. Entries are taken at
+// face value: the release tarball must be flat (top-level entries
+// like `prompts/`, `go/`, `android/` directly under the root).
+// Wrapper directories (e.g. GitHub-archive `<repo>-<sha>/`) are NOT
+// stripped — the velocity-resources release workflow is responsible
+// for emitting a flat tarball, and a wrapper just means the cache
+// will be missing `prompts/manifest.yaml` and setup will fail loudly.
+//
+// Entries that escape dst (path traversal, absolute paths) are
+// rejected; existing entries are overwritten.
 func extractTarGz(archivePath, dst string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -237,19 +240,10 @@ func extractTarGz(archivePath, dst string) error {
 		if err != nil {
 			return fmt.Errorf("tar: %w", err)
 		}
-		// Reject absolute paths and parent-traversal in the raw header.
-		// We do this before any wrapper-stripping to prevent a
-		// "../escape" or "/etc/x" entry from being normalised into a
-		// safe-looking local path.
-		rawClean := strings.TrimPrefix(hdr.Name, "./")
-		rawClean = strings.TrimPrefix(rawClean, "/")
-		if rawClean == "" {
-			continue
-		}
-		if filepath.IsAbs(hdr.Name) || strings.HasPrefix(hdr.Name, "/") || !filepath.IsLocal(filepath.FromSlash(rawClean)) {
+		rel, ok := safeEntryPath(hdr.Name)
+		if !ok {
 			return fmt.Errorf("tar: rejecting unsafe path %q", hdr.Name)
 		}
-		rel := stripTopLevel(hdr.Name)
 		if rel == "" {
 			continue
 		}
@@ -288,33 +282,19 @@ func extractTarGz(archivePath, dst string) error {
 	return nil
 }
 
-// stripTopLevel removes the first path component when the archive
-// is wrapped in a single top-level directory (e.g.
-// "velocity-resources-v0.6.0/prompts/manifest.yaml" →
-// "prompts/manifest.yaml"). We only strip when the first component
-// looks like a single wrapper: presence of ≥1 slash means it has a
-// real path inside.
-func stripTopLevel(name string) string {
-	name = strings.TrimPrefix(name, "./")
-	name = strings.TrimPrefix(name, "/")
-	if name == "" {
-		return ""
+// safeEntryPath normalises a tar entry name and rejects unsafe ones.
+// Returns ok=false for absolute or traversal paths; rel="" means the
+// entry is empty and should be skipped.
+func safeEntryPath(name string) (rel string, ok bool) {
+	clean := strings.TrimPrefix(name, "./")
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "" {
+		return "", true
 	}
-	parts := strings.SplitN(name, "/", 2)
-	if len(parts) < 2 {
-		// Top-level file (no subdir) — keep as-is.
-		return name
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || !filepath.IsLocal(filepath.FromSlash(clean)) {
+		return "", false
 	}
-	first := parts[0]
-	// Only strip wrappers that look like the GitHub-archive prefix
-	// (contains "-" and matches the resources tarball naming).
-	// Heuristic: strip any top-level directory whose name does not
-	// match an expected sibling layout slot.
-	known := map[string]bool{"prompts": true, "go": true, "android": true}
-	if known[first] {
-		return name
-	}
-	return parts[1]
+	return clean, true
 }
 
 // Install downloads, verifies, and atomically replaces destDir with
@@ -334,12 +314,7 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 	if err != nil {
 		return err
 	}
-	cleanupTmp := true
-	defer func() {
-		if cleanupTmp {
-			_ = os.RemoveAll(tmpDir)
-		}
-	}()
+	defer os.RemoveAll(tmpDir)
 
 	tarPath := filepath.Join(tmpDir, rel.AssetName())
 	shaPath := filepath.Join(tmpDir, rel.SHASumName())
@@ -384,11 +359,13 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 	}
 
 	// Atomic-ish swap: remove the existing dir, then rename. Rename
-	// over a non-empty dir is not portable.
+	// over a non-empty dir is not portable. Note: there is a brief
+	// window where destDir does not exist; concurrent SIGHUP-driven
+	// reload will see the previous templates kept in place because
+	// prompts.Reload preserves the existing store on failure.
 	_ = os.RemoveAll(destDir)
 	if err := os.Rename(stagingDir, destDir); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
-	cleanupTmp = true
 	return nil
 }

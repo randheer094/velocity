@@ -283,3 +283,57 @@ func TestLoadBadTemplateSyntax(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestLoadRejectsPlaceholderDrift(t *testing.T) {
+	defer resetForTest()
+	dir := t.TempDir()
+	writeFixture(t, dir, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: [Declared]\n",
+		"prompts/a.md":          "{{.Used}}",
+	})
+	err := Load(dir)
+	if err == nil {
+		t.Fatal("expected drift error")
+	}
+	if !strings.Contains(err.Error(), "drift") {
+		t.Errorf("expected drift error, got %v", err)
+	}
+}
+
+func TestLoadRejectsMissingPlaceholderEntry(t *testing.T) {
+	defer resetForTest()
+	dir := t.TempDir()
+	writeFixture(t, dir, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: []\n",
+		"prompts/a.md":          "{{.Used}}",
+	})
+	err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "missing entries") {
+		t.Fatalf("expected missing-entries error, got %v", err)
+	}
+}
+
+func TestLoadRejectsUnusedDeclaredPlaceholder(t *testing.T) {
+	defer resetForTest()
+	dir := t.TempDir()
+	writeFixture(t, dir, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: [Unused]\n",
+		"prompts/a.md":          "static",
+	})
+	err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "unused") {
+		t.Fatalf("expected unused-placeholders error, got %v", err)
+	}
+}
+
+func TestLoadAcceptsControlStructures(t *testing.T) {
+	defer resetForTest()
+	dir := t.TempDir()
+	writeFixture(t, dir, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: [Items, Show]\n",
+		"prompts/a.md":          "{{if .Show}}{{range .Items}}- {{.}}\n{{end}}{{end}}",
+	})
+	if err := Load(dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}

@@ -38,10 +38,10 @@ func requireResources() error {
 		return errors.New("config not loaded")
 	}
 	if cfg.Resources.RepoSlug == "" || cfg.Resources.Version == "" {
-		return fmt.Errorf("resources not configured. Run `velocity setup` first.")
+		return fmt.Errorf("resources not configured; run `velocity setup` first")
 	}
 	if err := prompts.Load(config.ResourcesDir()); err != nil {
-		return fmt.Errorf("%w\nResources missing or stale. Run `velocity setup` first.", err)
+		return fmt.Errorf("%w; resources missing or stale, run `velocity setup` first", err)
 	}
 	return nil
 }

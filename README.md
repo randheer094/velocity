@@ -271,7 +271,7 @@ Detects the project type, reads the matching `<type>/` subtree from
 the local resources cache at `~/.velocity/resources/`, and writes it
 under `.claude/` at the project root. The cache is populated by
 `velocity setup` (and refreshed by `velocity update-prompts`); if it
-is missing, `prepare` exits with `Resources not installed. Run \`velocity setup\` first.`
+is missing, `prepare` exits with `resources not installed; run \`velocity setup\` first`.
 
 The installed layout follows the resources repo: a `CLAUDE.md`
 index, a set of topic files under `.claude/rules/`, and the

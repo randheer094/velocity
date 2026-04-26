@@ -212,6 +212,79 @@ func TestInstallPreservesExistingOnFailure(t *testing.T) {
 	}
 }
 
+// TestInstallPreservesExistingWhenDownloadFails locks down the more
+// interesting case: an existing resources cache must survive a failed
+// install that gets past the major-version check.
+func TestInstallPreservesExistingWhenDownloadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	prev := DownloadBase
+	DownloadBase = srv.URL
+	t.Cleanup(func() { DownloadBase = prev })
+
+	dst := filepath.Join(t.TempDir(), "resources")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "sentinel"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Install(context.Background(), Release{RepoSlug: "x/y", Tag: "v0.0.0"}, dst, 0)
+	if err == nil {
+		t.Fatal("expected download to fail")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "sentinel")); err != nil {
+		t.Errorf("sentinel removed despite download failure: %v", err)
+	}
+}
+
+// TestInstallPreservesExistingWhenExtractFails covers the case where
+// download + sha verify succeed but extract fails (corrupt tarball or
+// unsafe path inside).
+func TestInstallPreservesExistingWhenExtractFails(t *testing.T) {
+	repo := "owner/repo"
+	tag := "v0.0.0"
+	tarball := buildTarGz(map[string]string{
+		"../escape": "bad",
+	})
+	hash := sha256.Sum256(tarball)
+	sums := hex.EncodeToString(hash[:]) + "  velocity-resources-" + tag + ".tar.gz\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/SHA256SUMS"):
+			_, _ = w.Write([]byte(sums))
+		case strings.HasSuffix(r.URL.Path, ".tar.gz"):
+			_, _ = w.Write(tarball)
+		default:
+			http.Error(w, "x", 404)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	prev := DownloadBase
+	DownloadBase = srv.URL
+	t.Cleanup(func() { DownloadBase = prev })
+
+	dst := filepath.Join(t.TempDir(), "resources")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "sentinel"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Install(context.Background(), Release{RepoSlug: repo, Tag: tag}, dst, 0)
+	if err == nil {
+		t.Fatal("expected extract to fail")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "sentinel")); err != nil {
+		t.Errorf("sentinel removed despite extract failure: %v", err)
+	}
+}
+
 func TestExtractTarGzPathTraversal(t *testing.T) {
 	// archive contains "../escape" — must be rejected.
 	tarball := buildTarGz(map[string]string{
@@ -239,25 +312,23 @@ func TestExtractTarGzAbsolutePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(dir, "out")
-	// Absolute paths get stripped to "etc/evil" by stripTopLevel,
-	// which is a safe relative path, so this currently succeeds.
-	// What we want to verify: nothing escapes dst.
-	if err := extractTarGz(tarPath, dst); err == nil {
-		// Confirm nothing was written outside dst.
-		if _, err := os.Stat("/etc/evil"); err == nil {
-			t.Fatal("/etc/evil exists — extraction escaped destination")
-		}
+	err := extractTarGz(tarPath, dst)
+	if err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("expected unsafe-path error, got %v", err)
 	}
 }
 
-func TestExtractTarGzWrappedTopLevel(t *testing.T) {
-	// Tarballs produced by GitHub archive have a wrapper dir; verify
-	// stripTopLevel handles them.
+func TestExtractTarGzFlatLayoutNoStrip(t *testing.T) {
+	// extractTarGz takes entries at face value — sibling top-levels
+	// land where they are declared, regardless of allowlist.
 	tarball := buildTarGz(map[string]string{
-		"velocity-resources-v0.6.0/prompts/manifest.yaml": "x",
+		"prompts/manifest.yaml":      "m",
+		"go/.claude/CLAUDE.md":       "g",
+		"android/.claude/CLAUDE.md":  "a",
+		"kotlin/.claude/CLAUDE.md":   "k",
 	})
 	dir := t.TempDir()
-	tarPath := filepath.Join(dir, "wrapped.tar.gz")
+	tarPath := filepath.Join(dir, "flat.tar.gz")
 	if err := os.WriteFile(tarPath, tarball, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -265,23 +336,34 @@ func TestExtractTarGzWrappedTopLevel(t *testing.T) {
 	if err := extractTarGz(tarPath, dst); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dst, "prompts", "manifest.yaml")); err != nil {
-		t.Errorf("wrapped manifest not extracted: %v", err)
+	for _, rel := range []string{
+		"prompts/manifest.yaml",
+		"go/.claude/CLAUDE.md",
+		"android/.claude/CLAUDE.md",
+		"kotlin/.claude/CLAUDE.md",
+	} {
+		if _, err := os.Stat(filepath.Join(dst, rel)); err != nil {
+			t.Errorf("missing %s: %v", rel, err)
+		}
 	}
 }
 
-func TestStripTopLevel(t *testing.T) {
-	cases := map[string]string{
-		"./prompts/manifest.yaml":               "prompts/manifest.yaml",
-		"prompts/manifest.yaml":                 "prompts/manifest.yaml",
-		"go/.claude/CLAUDE.md":                  "go/.claude/CLAUDE.md",
-		"velocity-resources-v0.6.0/prompts/x":   "prompts/x",
-		"":                                      "",
-		"top-only-file.txt":                     "top-only-file.txt",
+func TestSafeEntryPath(t *testing.T) {
+	cases := []struct {
+		name, wantRel string
+		wantOK        bool
+	}{
+		{"prompts/m.yaml", "prompts/m.yaml", true},
+		{"./prompts/m.yaml", "prompts/m.yaml", true},
+		{"", "", true},               // empty
+		{"/etc/evil", "", false},     // absolute
+		{"../escape", "", false},     // traversal
 	}
-	for in, want := range cases {
-		if got := stripTopLevel(in); got != want {
-			t.Errorf("stripTopLevel(%q) = %q, want %q", in, got, want)
+	for _, c := range cases {
+		got, ok := safeEntryPath(c.name)
+		if ok != c.wantOK || got != c.wantRel {
+			t.Errorf("safeEntryPath(%q) = (%q, %v), want (%q, %v)",
+				c.name, got, ok, c.wantRel, c.wantOK)
 		}
 	}
 }

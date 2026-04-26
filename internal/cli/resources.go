@@ -22,7 +22,7 @@ func loadCachedTemplates(resourcesDir string, pt projectType) ([]templateEntry, 
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("Resources not installed. Run `velocity setup` first.")
+			return nil, fmt.Errorf("resources not installed; run `velocity setup` first")
 		}
 		return nil, err
 	}

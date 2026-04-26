@@ -188,23 +188,34 @@ func TestSetupHappy(t *testing.T) {
 	}
 }
 
-func TestSetupRejectsURLPrefixedRepoSlug(t *testing.T) {
-	// flag normalization happens for us, so verify normalizeRepoSlug
-	// alone via cmd run with URL-style flag.
-	seedConfigForSetup(t)
-	cmd := newSetupCmd()
-	_ = cmd.Flags().Set("repo", "https://github.com/owner/repo")
-	_ = cmd.Flags().Set("version", "v0.0.1")
+func TestSetupNormalizesURLPrefixedRepoSlug(t *testing.T) {
+	repoSlug := "owner/velocity-resources"
+	tag := "v0.6.0"
+	startReleaseServer(t, repoSlug, tag, map[string]string{
+		"prompts/manifest.yaml": "version: 0\nprompts:\n  - id: a\n    path: a.md\n    placeholders: []\n",
+		"prompts/a.md":          "x",
+	}, "")
 
-	// This will fail at download (no server), but the slug will have
-	// been normalized cleanly. Run it and confirm we don't get a
-	// "invalid repo slug" error.
+	seedConfigForSetup(t)
+
+	cmd := newSetupCmd()
+	if err := cmd.Flags().Set("repo", "https://github.com/"+repoSlug); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("version", tag); err != nil {
+		t.Fatal(err)
+	}
+	cmd.SetContext(context.Background())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetContext(context.Background())
-	err := cmd.RunE(cmd, nil)
-	if err != nil && strings.Contains(err.Error(), "invalid repo slug") {
-		t.Errorf("URL-prefixed slug should have normalized: %v", err)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if err := config.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Get().Resources.RepoSlug; got != repoSlug {
+		t.Errorf("RepoSlug = %q, want %q (URL prefix should have been stripped)", got, repoSlug)
 	}
 }
 
