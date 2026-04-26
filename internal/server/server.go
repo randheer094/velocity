@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/randheer094/velocity/internal/arch"
+	"github.com/randheer094/velocity/internal/code"
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/jira"
@@ -42,6 +44,8 @@ func Run() error {
 
 	queueCtx, cancelQueue := context.WithCancel(context.Background())
 	defer cancelQueue()
+	arch.EnqueueFn = webhook.Enqueue
+	code.EnqueueFn = webhook.Enqueue
 	webhook.Start(queueCtx, cfg.Server.MaxConcurrency, cfg.Server.QueueSize)
 
 	mux := http.NewServeMux()

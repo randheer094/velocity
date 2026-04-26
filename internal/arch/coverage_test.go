@@ -9,8 +9,9 @@ import (
 	"github.com/randheer094/velocity/internal/db"
 )
 
-// TestAdvanceWavePastEnd hits the archiveDone branch when the plan's
-// ActiveWaveIdx is already past the last wave.
+// TestAdvanceWavePastEnd hits the archive enqueue when the plan's
+// ActiveWaveIdx is already past the last wave; running Archive then
+// flips status to PlanDone.
 func TestAdvanceWavePastEnd(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
@@ -24,8 +25,15 @@ func TestAdvanceWavePastEnd(t *testing.T) {
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
+	cap := captureEnqueue(t)
 	if err := AdvanceWave(ctx, "ARCH-AW-PAST"); err != nil {
 		t.Errorf("AdvanceWave: %v", err)
+	}
+	if !cap.has(kindArchive) {
+		t.Errorf("expected %s enqueued, got %v", kindArchive, cap.kinds())
+	}
+	if err := Archive(ctx, "ARCH-AW-PAST"); err != nil {
+		t.Errorf("Archive: %v", err)
 	}
 	got, _ := db.GetPlan(ctx, "ARCH-AW-PAST")
 	if got.Status != data.PlanDone {

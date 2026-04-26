@@ -4,10 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/randheer094/velocity/internal/arch"
 	"github.com/randheer094/velocity/internal/code"
+)
+
+// QueueLLM carries LLM-bound agent entries (long-running, bounded by
+// cfg.Server.MaxConcurrency). QueueOps is strictly serialized (1 worker)
+// and carries short DB/Jira/GitHub steps plus workspace cleanup.
+const (
+	QueueLLM = "llm"
+	QueueOps = "ops"
 )
 
 // Kind constants identify which agent entry point a queued job drives.
@@ -15,12 +22,40 @@ import (
 const (
 	KindArchRun         = "arch.Run"
 	KindArchAdvanceWave = "arch.AdvanceWave"
+	KindArchAssignWave  = "arch.AssignWave"
+	KindArchArchive     = "arch.Archive"
 	KindArchOnDismissed = "arch.OnDismissed"
 	KindCodeRun         = "code.Run"
-	KindCodeMarkMerged  = "code.MarkMerged"
 	KindCodeIterate     = "code.Iterate"
+	KindCodeMarkMerged  = "code.MarkMerged"
 	KindCodeOnDismissed = "code.OnDismissed"
+	KindCodeCleanup     = "code.Cleanup"
 )
+
+// kindQueue maps a kind to its queue. Unknown kinds fall through to
+// QueueOps — a fresh deployment that lands a row for an unrecognised
+// kind won't silently burn LLM worker slots.
+var kindQueue = map[string]string{
+	KindArchRun:         QueueLLM,
+	KindCodeRun:         QueueLLM,
+	KindCodeIterate:     QueueLLM,
+	KindArchAdvanceWave: QueueOps,
+	KindArchAssignWave:  QueueOps,
+	KindArchArchive:     QueueOps,
+	KindArchOnDismissed: QueueOps,
+	KindCodeMarkMerged:  QueueOps,
+	KindCodeOnDismissed: QueueOps,
+	KindCodeCleanup:     QueueOps,
+}
+
+// QueueForKind returns the queue name for the given kind. Defaults to
+// QueueOps so a mis-configured kind is serialized rather than parallel.
+func QueueForKind(kind string) string {
+	if q, ok := kindQueue[kind]; ok {
+		return q
+	}
+	return QueueOps
+}
 
 type archRunPayload struct {
 	Key         string `json:"key"`
@@ -30,6 +65,15 @@ type archRunPayload struct {
 }
 
 type archAdvanceWavePayload struct {
+	ParentKey string `json:"parent_key"`
+}
+
+type archAssignWavePayload struct {
+	ParentKey string `json:"parent_key"`
+	WaveIdx   int    `json:"wave_idx"`
+}
+
+type archArchivePayload struct {
 	ParentKey string `json:"parent_key"`
 }
 
@@ -60,12 +104,17 @@ type codeIteratePayload struct {
 	Hint    string             `json:"hint"`
 }
 
-// codeOnDismissedPayload carries ParentKey so the same dispatch branch
-// cascades to arch.AdvanceWave, matching the pre-DB closure semantics.
+// codeOnDismissedPayload carries ParentKey so the handler can enqueue
+// the parent's AdvanceWave follow-up — one step per event, no inline
+// cascade into arch.
 type codeOnDismissedPayload struct {
 	Key        string `json:"key"`
 	JiraStatus string `json:"jira_status"`
 	ParentKey  string `json:"parent_key,omitempty"`
+}
+
+type codeCleanupPayload struct {
+	IssueKey string `json:"issue_key"`
 }
 
 // dispatch routes one claimed job to its agent entry. Returns an
@@ -91,6 +140,20 @@ var dispatch = func(ctx context.Context, kind string, payload json.RawMessage) e
 			return fmt.Errorf("%s: %w", kind, err)
 		}
 		return arch.AdvanceWave(ctx, p.ParentKey)
+
+	case KindArchAssignWave:
+		var p archAssignWavePayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return fmt.Errorf("%s: %w", kind, err)
+		}
+		return arch.AssignWave(ctx, p.ParentKey, p.WaveIdx)
+
+	case KindArchArchive:
+		var p archArchivePayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return fmt.Errorf("%s: %w", kind, err)
+		}
+		return arch.Archive(ctx, p.ParentKey)
 
 	case KindArchOnDismissed:
 		var p archOnDismissedPayload
@@ -131,12 +194,18 @@ var dispatch = func(ctx context.Context, kind string, payload json.RawMessage) e
 			return err
 		}
 		if p.ParentKey != "" {
-			if err := arch.AdvanceWave(ctx, p.ParentKey); err != nil {
-				slog.Error("arch: advance after dismiss failed", "parent", p.ParentKey, "err", err)
-				return err
-			}
+			Enqueue(KindArchAdvanceWave, "arch.AdvanceWave:"+p.ParentKey, archAdvanceWavePayload{
+				ParentKey: p.ParentKey,
+			})
 		}
 		return nil
+
+	case KindCodeCleanup:
+		var p codeCleanupPayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return fmt.Errorf("%s: %w", kind, err)
+		}
+		return code.Cleanup(ctx, p.IssueKey)
 
 	default:
 		return fmt.Errorf("unknown webhook job kind: %s", kind)

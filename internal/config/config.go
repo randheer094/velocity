@@ -223,7 +223,9 @@ type LLMConfig struct {
 }
 
 // ServerConfig holds HTTP listener + FIFO dispatch settings.
-// MaxConcurrency defaults to 1 (strict serial). Full queue → drop + log.
+// MaxConcurrency gates the llm queue (arch.Run / code.Run /
+// code.Iterate); the ops queue is always 1 worker. Defaults to 1
+// (strict serial LLM work). Full queue → drop + log per queue.
 type ServerConfig struct {
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`

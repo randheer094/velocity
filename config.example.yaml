@@ -55,5 +55,5 @@ llm:
 server:
   host: 0.0.0.0
   port: 8000
-  max_concurrency: 1
-  queue_size: 1024
+  max_concurrency: 1   # llm-queue workers (arch.Run / code.Run / code.Iterate); ops queue is always 1 worker
+  queue_size: 1024     # soft cap on pending rows per queue

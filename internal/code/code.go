@@ -211,6 +211,8 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 }
 
 // MarkMerged transitions the sub-task to DONE after its PR merges.
+// Workspace cleanup is enqueued as a separate Cleanup event — one
+// logical step per queue row.
 func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 	client := jira.Shared()
 	if client == nil {
@@ -232,7 +234,8 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 		}
 		_ = db.SaveCodeTask(ctx, task)
 	}
-	_ = os.RemoveAll(config.WorkspacePath(issueKey))
+	EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
+		map[string]any{"issue_key": issueKey})
 	slog.Info("code: merged → done", "key", issueKey)
 	return nil
 }
@@ -240,12 +243,28 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 // OnDismissed cancels any in-flight run and marks the sub-task
 // dismissed. The caller must enqueue arch.AdvanceWave so the parent
 // advances past it. jiraStatus is the sub-task's Jira status name
-// from the dismiss webhook.
+// from the dismiss webhook. Workspace cleanup is enqueued as a
+// separate Cleanup event so the cancelled Run has time to release
+// its file descriptors.
 func OnDismissed(ctx context.Context, issueKey, jiraStatus string) error {
 	cancelIfRunning(issueKey)
 	if err := db.MarkCodeDismissed(ctx, issueKey, jiraStatus); err != nil {
 		slog.Warn("code: mark dismissed", "key", issueKey, "err", err)
 	}
+	EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
+		map[string]any{"issue_key": issueKey})
+	return nil
+}
+
+// Cleanup removes the per-issue workspace. Skipped when a Run or
+// Iterate is still in flight for the same key — its pre-clone
+// RemoveAll handles eventual cleanup on the next Run.
+func Cleanup(_ context.Context, issueKey string) error {
+	if IsInFlight(issueKey) {
+		slog.Warn("code: run in flight, skipping workspace cleanup", "key", issueKey)
+		return nil
+	}
 	_ = os.RemoveAll(config.WorkspacePath(issueKey))
+	slog.Info("code: workspace cleaned", "key", issueKey)
 	return nil
 }

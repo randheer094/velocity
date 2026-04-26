@@ -71,8 +71,18 @@ func TestAdvanceWaveCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	statusOverride.Store("ARCH-AW-3-1", "Done")
+
+	cap := captureEnqueue(t)
 	if err := AdvanceWave(ctx, "ARCH-AW-3"); err != nil {
 		t.Errorf("AdvanceWave: %v", err)
+	}
+	if !cap.has(kindArchive) {
+		t.Errorf("expected %s enqueued, got %v", kindArchive, cap.kinds())
+	}
+	// AdvanceWave defers archival to the Archive handler — plan stays
+	// PlanCoding until Archive runs.
+	if err := Archive(ctx, "ARCH-AW-3"); err != nil {
+		t.Errorf("Archive: %v", err)
 	}
 	got, _ := db.GetPlan(ctx, "ARCH-AW-3")
 	if got.Status != data.PlanDone {
@@ -81,22 +91,41 @@ func TestAdvanceWaveCompletes(t *testing.T) {
 }
 
 func TestAssignWaveOutOfRange(t *testing.T) {
-	plan := &data.Plan{ParentJiraKey: "ARCH-AS-1", Waves: []data.Wave{}}
-	if err := assignWave(context.Background(), plan, 0); err == nil {
+	requireDB(t)
+	ctx := context.Background()
+	plan := &data.Plan{ParentJiraKey: "ARCH-AS-1", Name: "x", RepoURL: "r", Waves: []data.Wave{}}
+	if err := db.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := AssignWave(ctx, "ARCH-AS-1", 0); err == nil {
 		t.Error("expected out-of-range error")
 	}
-	if err := assignWave(context.Background(), plan, -1); err == nil {
+	if err := AssignWave(ctx, "ARCH-AS-1", -1); err == nil {
 		t.Error("expected out-of-range error for -1")
 	}
 }
 
 func TestAssignWaveSkipsBlankKey(t *testing.T) {
+	requireDB(t)
+	ctx := context.Background()
 	plan := &data.Plan{
 		ParentJiraKey: "ARCH-AS-2",
+		Name:          "x",
+		RepoURL:       "r",
 		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "t-x"}}}}, // no JiraKey
 	}
-	if err := assignWave(context.Background(), plan, 0); err != nil {
-		t.Errorf("assignWave: %v", err)
+	if err := db.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := AssignWave(ctx, "ARCH-AS-2", 0); err != nil {
+		t.Errorf("AssignWave: %v", err)
+	}
+}
+
+func TestAssignWaveNoPlan(t *testing.T) {
+	requireDB(t)
+	if err := AssignWave(context.Background(), "ARCH-AS-NONE", 0); err != nil {
+		t.Errorf("AssignWave with no plan: %v", err)
 	}
 }
 

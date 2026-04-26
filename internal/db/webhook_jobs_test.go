@@ -26,7 +26,7 @@ func TestInsertAndClaimWebhookJob(t *testing.T) {
 	ctx := context.Background()
 
 	payload := map[string]string{"branch": "PROJ-1", "pr_url": "https://x"}
-	id, err := InsertWebhookJob(ctx, "code.MarkMerged", "code.MarkMerged:PROJ-1", payload)
+	id, err := InsertWebhookJob(ctx, "ops", "code.MarkMerged", "code.MarkMerged:PROJ-1", payload)
 	if err != nil {
 		t.Fatalf("InsertWebhookJob: %v", err)
 	}
@@ -34,12 +34,15 @@ func TestInsertAndClaimWebhookJob(t *testing.T) {
 		t.Error("expected id > 0")
 	}
 
-	job, err := ClaimNextWebhookJob(ctx)
+	job, err := ClaimNextWebhookJob(ctx, "ops")
 	if err != nil {
 		t.Fatalf("ClaimNextWebhookJob: %v", err)
 	}
 	if job == nil {
 		t.Fatal("expected a claimed job")
+	}
+	if job.Queue != "ops" {
+		t.Errorf("queue = %q", job.Queue)
 	}
 	if job.Kind != "code.MarkMerged" {
 		t.Errorf("kind = %q", job.Kind)
@@ -58,8 +61,8 @@ func TestInsertAndClaimWebhookJob(t *testing.T) {
 		t.Errorf("payload = %+v", got)
 	}
 
-	// Next claim: nothing pending.
-	empty, err := ClaimNextWebhookJob(ctx)
+	// Next claim on the same queue: nothing pending.
+	empty, err := ClaimNextWebhookJob(ctx, "ops")
 	if err != nil {
 		t.Fatalf("ClaimNextWebhookJob empty: %v", err)
 	}
@@ -74,11 +77,11 @@ func TestMarkWebhookJobDone(t *testing.T) {
 	t.Cleanup(func() { cleanJobs(t) })
 	ctx := context.Background()
 
-	id, err := InsertWebhookJob(ctx, "k", "n", map[string]string{})
+	id, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ClaimNextWebhookJob(ctx); err != nil {
+	if _, err := ClaimNextWebhookJob(ctx, "ops"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MarkWebhookJobDone(ctx, id); err != nil {
@@ -101,11 +104,11 @@ func TestMarkWebhookJobFailed(t *testing.T) {
 	t.Cleanup(func() { cleanJobs(t) })
 	ctx := context.Background()
 
-	id, err := InsertWebhookJob(ctx, "k", "n", map[string]string{})
+	id, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ClaimNextWebhookJob(ctx); err != nil {
+	if _, err := ClaimNextWebhookJob(ctx, "ops"); err != nil {
 		t.Fatal(err)
 	}
 	if err := MarkWebhookJobFailed(ctx, id, "oh no"); err != nil {
@@ -129,13 +132,13 @@ func TestResetRunningWebhookJobs(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		if _, err := InsertWebhookJob(ctx, "k", "n", map[string]int{"i": i}); err != nil {
+		if _, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]int{"i": i}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Claim 2 rows so they flip to running.
 	for i := 0; i < 2; i++ {
-		if _, err := ClaimNextWebhookJob(ctx); err != nil {
+		if _, err := ClaimNextWebhookJob(ctx, "ops"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -165,32 +168,43 @@ func TestCountPendingWebhookJobs(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 4; i++ {
-		if _, err := InsertWebhookJob(ctx, "k", "n", map[string]int{"i": i}); err != nil {
+		if _, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]int{"i": i}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	n, err := CountPendingWebhookJobs(ctx)
+	// One LLM-queue row should not affect the ops-queue count.
+	if _, err := InsertWebhookJob(ctx, "llm", "k", "n", map[string]int{"i": 99}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := CountPendingWebhookJobs(ctx, "ops")
 	if err != nil {
 		t.Fatalf("CountPendingWebhookJobs: %v", err)
 	}
 	if n != 4 {
-		t.Errorf("pending = %d, want 4", n)
+		t.Errorf("ops pending = %d, want 4", n)
+	}
+	llmN, err := CountPendingWebhookJobs(ctx, "llm")
+	if err != nil {
+		t.Fatalf("CountPendingWebhookJobs(llm): %v", err)
+	}
+	if llmN != 1 {
+		t.Errorf("llm pending = %d, want 1", llmN)
 	}
 }
 
-// TestClaimNextWebhookJobFIFO confirms oldest-first ordering.
+// TestClaimNextWebhookJobFIFO confirms oldest-first ordering per queue.
 func TestClaimNextWebhookJobFIFO(t *testing.T) {
 	requireDB(t)
 	cleanJobs(t)
 	t.Cleanup(func() { cleanJobs(t) })
 	ctx := context.Background()
 
-	id1, _ := InsertWebhookJob(ctx, "k", "first", map[string]string{})
-	id2, _ := InsertWebhookJob(ctx, "k", "second", map[string]string{})
-	id3, _ := InsertWebhookJob(ctx, "k", "third", map[string]string{})
+	id1, _ := InsertWebhookJob(ctx, "ops", "k", "first", map[string]string{})
+	id2, _ := InsertWebhookJob(ctx, "ops", "k", "second", map[string]string{})
+	id3, _ := InsertWebhookJob(ctx, "ops", "k", "third", map[string]string{})
 
 	for _, want := range []int64{id1, id2, id3} {
-		j, err := ClaimNextWebhookJob(ctx)
+		j, err := ClaimNextWebhookJob(ctx, "ops")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,8 +214,47 @@ func TestClaimNextWebhookJobFIFO(t *testing.T) {
 	}
 }
 
+// TestClaimNextWebhookJobPerQueueIsolation: an LLM claim never sees an
+// ops row and vice versa, even when the ops row was enqueued first.
+func TestClaimNextWebhookJobPerQueueIsolation(t *testing.T) {
+	requireDB(t)
+	cleanJobs(t)
+	t.Cleanup(func() { cleanJobs(t) })
+	ctx := context.Background()
+
+	opsID, _ := InsertWebhookJob(ctx, "ops", "ops.kind", "ops.kind", map[string]string{})
+	llmID, _ := InsertWebhookJob(ctx, "llm", "llm.kind", "llm.kind", map[string]string{})
+
+	llm, err := ClaimNextWebhookJob(ctx, "llm")
+	if err != nil || llm == nil {
+		t.Fatalf("llm claim: %+v %v", llm, err)
+	}
+	if llm.ID != llmID {
+		t.Errorf("llm claim returned id %d, want %d", llm.ID, llmID)
+	}
+	if llm.Queue != "llm" {
+		t.Errorf("llm claim returned queue %q", llm.Queue)
+	}
+
+	ops, err := ClaimNextWebhookJob(ctx, "ops")
+	if err != nil || ops == nil {
+		t.Fatalf("ops claim: %+v %v", ops, err)
+	}
+	if ops.ID != opsID {
+		t.Errorf("ops claim returned id %d, want %d", ops.ID, opsID)
+	}
+
+	// Both queues should now be empty.
+	if j, err := ClaimNextWebhookJob(ctx, "llm"); err != nil || j != nil {
+		t.Errorf("llm post-empty: %+v %v", j, err)
+	}
+	if j, err := ClaimNextWebhookJob(ctx, "ops"); err != nil || j != nil {
+		t.Errorf("ops post-empty: %+v %v", j, err)
+	}
+}
+
 // TestClaimNextWebhookJobParallel exercises FOR UPDATE SKIP LOCKED —
-// two parallel claims must hand out distinct rows.
+// two parallel claims on the same queue must hand out distinct rows.
 func TestClaimNextWebhookJobParallel(t *testing.T) {
 	requireDB(t)
 	cleanJobs(t)
@@ -209,7 +262,7 @@ func TestClaimNextWebhookJobParallel(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 10; i++ {
-		if _, err := InsertWebhookJob(ctx, "k", "n", map[string]int{"i": i}); err != nil {
+		if _, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]int{"i": i}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -221,7 +274,7 @@ func TestClaimNextWebhookJobParallel(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			j, err := ClaimNextWebhookJob(ctx)
+			j, err := ClaimNextWebhookJob(ctx, "ops")
 			if err != nil || j == nil {
 				return
 			}
@@ -242,10 +295,10 @@ func TestClaimNextWebhookJobParallel(t *testing.T) {
 func TestWebhookJobsNotStarted(t *testing.T) {
 	withNoStart(t, func() {
 		ctx := context.Background()
-		if _, err := InsertWebhookJob(ctx, "k", "n", map[string]string{}); err != ErrNotStarted {
+		if _, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]string{}); err != ErrNotStarted {
 			t.Errorf("InsertWebhookJob: %v", err)
 		}
-		if _, err := ClaimNextWebhookJob(ctx); err != ErrNotStarted {
+		if _, err := ClaimNextWebhookJob(ctx, "ops"); err != ErrNotStarted {
 			t.Errorf("ClaimNextWebhookJob: %v", err)
 		}
 		if err := MarkWebhookJobDone(ctx, 1); err != ErrNotStarted {
@@ -257,7 +310,7 @@ func TestWebhookJobsNotStarted(t *testing.T) {
 		if _, err := ResetRunningWebhookJobs(ctx); err != ErrNotStarted {
 			t.Errorf("ResetRunningWebhookJobs: %v", err)
 		}
-		if _, err := CountPendingWebhookJobs(ctx); err != ErrNotStarted {
+		if _, err := CountPendingWebhookJobs(ctx, "ops"); err != ErrNotStarted {
 			t.Errorf("CountPendingWebhookJobs: %v", err)
 		}
 	})
@@ -267,7 +320,7 @@ func TestWebhookJobsNotStarted(t *testing.T) {
 // path (channels can't be marshalled).
 func TestInsertWebhookJobMarshalError(t *testing.T) {
 	requireDB(t)
-	_, err := InsertWebhookJob(context.Background(), "k", "n", make(chan int))
+	_, err := InsertWebhookJob(context.Background(), "ops", "k", "n", make(chan int))
 	if err == nil {
 		t.Error("expected marshal error")
 	}
@@ -276,10 +329,10 @@ func TestInsertWebhookJobMarshalError(t *testing.T) {
 func TestWebhookJobsCanceledCtx(t *testing.T) {
 	requireDB(t)
 	ctx := canceledCtx()
-	if _, err := InsertWebhookJob(ctx, "k", "n", map[string]string{}); err == nil {
+	if _, err := InsertWebhookJob(ctx, "ops", "k", "n", map[string]string{}); err == nil {
 		t.Error("InsertWebhookJob: expected error")
 	}
-	if _, err := ClaimNextWebhookJob(ctx); err == nil {
+	if _, err := ClaimNextWebhookJob(ctx, "ops"); err == nil {
 		t.Error("ClaimNextWebhookJob: expected error")
 	}
 	if err := MarkWebhookJobDone(ctx, 1); err == nil {
@@ -291,7 +344,7 @@ func TestWebhookJobsCanceledCtx(t *testing.T) {
 	if _, err := ResetRunningWebhookJobs(ctx); err == nil {
 		t.Error("ResetRunningWebhookJobs: expected error")
 	}
-	if _, err := CountPendingWebhookJobs(ctx); err == nil {
+	if _, err := CountPendingWebhookJobs(ctx, "ops"); err == nil {
 		t.Error("CountPendingWebhookJobs: expected error")
 	}
 }

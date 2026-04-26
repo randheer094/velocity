@@ -318,8 +318,8 @@ to request a template.
 server:
   host: 0.0.0.0
   port: 8000
-  max_concurrency: 1       # workers draining the FIFO queue (default 1 = strict serial)
-  queue_size: 1024         # soft cap on pending webhook_jobs rows; overflow is dropped + logged
+  max_concurrency: 1       # llm-queue workers (arch.Run / code.Run / code.Iterate). Default 1 = strict serial. Ops queue is always 1 worker.
+  queue_size: 1024         # soft cap on pending webhook_jobs rows per queue; overflow is dropped + logged
 
 jira:
   base_url: https://acme.atlassian.net
@@ -374,19 +374,37 @@ name so dismissed and merged remain distinguishable in the DB.
 
 ### Server tuning
 
-- `max_concurrency = 1` (default) → strict serial FIFO across every
-  ticket. Safe baseline.
-- `max_concurrency = N` (>1) → up to N agent runs in parallel;
-  dequeue order is still FIFO. Raise this if your Claude and Jira
-  plans can tolerate concurrent clones + pushes.
-- `queue_size` is a **soft cap** on pending rows in the
-  `webhook_jobs` table. Enqueue checks the pending count first; if
-  the backlog is larger than `queue_size`, the job is dropped and
-  logged. Webhook senders receive `202` regardless.
+Velocity runs **two FIFO queues** in `webhook_jobs`, separated by
+the `queue` column:
+
+- **`llm`** — carries `arch.Run`, `code.Run`, `code.Iterate` (the
+  expensive Claude calls). Sized by `max_concurrency`.
+- **`ops`** — carries every other kind: `arch.AdvanceWave`,
+  `arch.AssignWave`, `arch.Archive`, `arch.OnDismissed`,
+  `code.MarkMerged`, `code.OnDismissed`, `code.Cleanup`. Always
+  one worker, so these short DB/Jira/GitHub steps never race
+  each other.
+
+Tuning notes:
+
+- `max_concurrency = 1` (default) → strict serial LLM work. Safe
+  baseline.
+- `max_concurrency = N` (>1) → up to N LLM-bound jobs run in
+  parallel (different keys). Raise this if your Claude / Jira /
+  GitHub stacks tolerate concurrent clones + pushes.
+- The ops queue worker count is hard-coded to 1.
+- `queue_size` is a **soft cap** applied per queue, so a flooded
+  ops backlog can't starve LLM enqueues. Enqueue checks the pending
+  count for the kind's queue; if the backlog exceeds `queue_size`,
+  the job is dropped and logged. Webhook senders receive `202`
+  regardless.
+- Each row represents **one logical step**. Handlers never inline-
+  call another kind's logic — when more work is needed they
+  enqueue a follow-up row and return.
 - The queue is Postgres-backed (`SELECT … FOR UPDATE SKIP LOCKED`)
   and survives daemon restart — rows stuck in `running` when the
   daemon died are reset to `pending` on next start. Live view:
-  `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;`.
+  `SELECT queue, status, count(*) FROM webhook_jobs GROUP BY 1, 2;`.
 
 ### LLM per-role settings
 
@@ -615,7 +633,7 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 | GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |
 | Sub-task PR never opens | `code: stage failed`; usually a `git push` auth failure or a Claude timeout. Bump `llm.code.timeout_sec`. |
-| Queue drops under load | `SELECT status, count(*) FROM webhook_jobs GROUP BY 1;` — if pending is near `server.queue_size`, raise the cap or `server.max_concurrency` (or both). |
+| Queue drops under load | `SELECT queue, status, count(*) FROM webhook_jobs GROUP BY 1, 2;` — if pending is near `server.queue_size`, raise the cap. If the LLM queue is the saturated one, also raise `server.max_concurrency`; the ops worker is always 1. |
 | Schema change not picked up | Add a new `internal/db/migrations/NNNN_*.sql` and restart; migrations are forward-only. |
 
 Full errors always land in `~/.velocity/daemon.log`. Jira comments
