@@ -6,7 +6,26 @@ import (
 	"testing"
 
 	"github.com/randheer094/velocity/internal/config"
+	"github.com/randheer094/velocity/internal/prompts"
 )
+
+// loadFixturePrompts installs a small in-memory prompt set sufficient
+// for the arch package's tests. All call sites that hit the LLM path
+// must use this so render errors don't masquerade as real failures.
+func loadFixturePrompts(t *testing.T) {
+	t.Helper()
+	prompts.SetForTest(t, map[string]string{
+		"arch_plan":    "{{.PlanBegin}} parent={{.ParentKey}} req={{.Requirement}} {{.PlanEnd}}",
+		"failure_jira": "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
+	})
+}
+
+// resetPromptsForTest tears down any installed prompts so the no-store
+// fallback path can be exercised.
+func resetPromptsForTest(t *testing.T) {
+	t.Helper()
+	prompts.ResetForTest(t)
+}
 
 const cfgJSON = `{
   "jira": {

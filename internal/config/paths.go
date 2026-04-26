@@ -13,6 +13,8 @@ const (
 	pidFilename     = "daemon.pid"
 	logFilename     = "daemon.log"
 	workspaceSubdir = "workspace"
+	resourcesSubdir = "resources"
+	versionFilename = "VERSION"
 )
 
 var (
@@ -38,6 +40,19 @@ func LogfilePath() string { return filepath.Join(AgentDir, logFilename) }
 
 func WorkspacePath(jiraKey string) string {
 	return filepath.Join(WorkspaceDir, jiraKey)
+}
+
+// ResourcesDir is the local cache populated by `velocity setup` and
+// refreshed by `velocity update-prompts`. The daemon reads prompts and
+// project templates from here at runtime.
+func ResourcesDir() string {
+	return filepath.Join(AgentDir, resourcesSubdir)
+}
+
+// ResourcesVersionPath is the resolved path of the VERSION file under
+// the resources cache.
+func ResourcesVersionPath() string {
+	return filepath.Join(ResourcesDir(), versionFilename)
 }
 
 // EnsureRuntimeDirs creates AgentDir and WorkspaceDir.

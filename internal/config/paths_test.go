@@ -30,6 +30,12 @@ func TestSetDirAndPaths(t *testing.T) {
 	if WorkspacePath("ABC-1") != filepath.Join(dir, "workspace", "ABC-1") {
 		t.Errorf("WorkspacePath wrong: %q", WorkspacePath("ABC-1"))
 	}
+	if ResourcesDir() != filepath.Join(dir, "resources") {
+		t.Errorf("ResourcesDir = %q", ResourcesDir())
+	}
+	if ResourcesVersionPath() != filepath.Join(dir, "resources", "VERSION") {
+		t.Errorf("ResourcesVersionPath = %q", ResourcesVersionPath())
+	}
 }
 
 func TestEnsureRuntimeDirs(t *testing.T) {

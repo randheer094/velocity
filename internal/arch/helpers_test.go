@@ -131,8 +131,9 @@ func TestRedactAndTruncate(t *testing.T) {
 	}
 }
 
-func TestFormatFailureComment(t *testing.T) {
-	got := formatFailureComment("arch", "stage1", "boom")
+func TestRenderFailureCommentFallback(t *testing.T) {
+	// No prompts loaded → fallback one-liner.
+	got := renderFailureComment("arch", "stage1", "boom")
 	if !strings.Contains(got, "arch") || !strings.Contains(got, "stage1") || !strings.Contains(got, "boom") {
 		t.Errorf("comment = %q", got)
 	}
@@ -176,24 +177,24 @@ func TestCancelHelpers(t *testing.T) {
 	}
 }
 
-func TestBuildArchPrompt(t *testing.T) {
-	got := buildArchPrompt("PROJ-1", "do thing")
+func TestBuildArchPromptUsesTemplate(t *testing.T) {
+	loadFixturePrompts(t)
+	got, err := buildArchPrompt("PROJ-1", "do thing")
+	if err != nil {
+		t.Fatalf("buildArchPrompt: %v", err)
+	}
 	if !strings.Contains(got, "PROJ-1") || !strings.Contains(got, "do thing") {
 		t.Errorf("prompt missing fields: %q", got)
 	}
 	if !strings.Contains(got, planBegin) || !strings.Contains(got, planEnd) {
-		t.Errorf("prompt missing markers")
+		t.Errorf("prompt missing markers: %q", got)
 	}
-	for _, section := range []string{
-		"Files to change:",
-		"Acceptance criteria:",
-		"Out of scope:",
-		"Wave rules",
-		"File disjointness",
-	} {
-		if !strings.Contains(got, section) {
-			t.Errorf("prompt missing section %q", section)
-		}
+}
+
+func TestBuildArchPromptWithoutLoad(t *testing.T) {
+	resetPromptsForTest(t)
+	if _, err := buildArchPrompt("PROJ-1", "do thing"); err == nil {
+		t.Error("expected error without prompts loaded")
 	}
 }
 

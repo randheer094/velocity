@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/randheer094/velocity/internal/config"
 )
 
 type projectType string
@@ -162,7 +163,7 @@ func newPrepareCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "prepare PROJECTPATH",
-		Short: "Install CLAUDE.md and the prepare-for-pr skill from velocity-resources (Go / Android)",
+		Short: "Install CLAUDE.md and the prepare-for-pr skill from the local resources cache (Go / Android)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectPath(args[0])
@@ -174,14 +175,9 @@ func newPrepareCmd() *cobra.Command {
 				return fmt.Errorf("unsupported project: %s has neither go.mod nor build.gradle[.kts]; prepare currently supports Go and Android", root)
 			}
 			out := cmd.OutOrStdout()
-			ref := resourcesRef()
 			fmt.Fprintf(out, "Detected %s project at %s\n", pt, root)
-			fmt.Fprintf(out, "Fetching templates from %s@%s\n", resourcesRepo, ref)
-			ctx := cmd.Context()
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			entries, err := fetchTemplates(ctx, pt, ref)
+			fmt.Fprintf(out, "Reading templates from %s\n", config.ResourcesDir())
+			entries, err := loadCachedTemplates(config.ResourcesDir(), pt)
 			if err != nil {
 				return err
 			}
@@ -222,20 +218,3 @@ func resolveProjectPath(raw string) (string, error) {
 	return abs, nil
 }
 
-func installTemplates(root string, entries []templateEntry, force bool) (written, skipped []string, err error) {
-	for _, e := range entries {
-		dst := filepath.Join(root, filepath.FromSlash(e.relPath))
-		if _, statErr := os.Stat(dst); statErr == nil && !force {
-			skipped = append(skipped, e.relPath)
-			continue
-		}
-		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
-			return written, skipped, mkErr
-		}
-		if wErr := os.WriteFile(dst, e.data, 0o644); wErr != nil {
-			return written, skipped, wErr
-		}
-		written = append(written, e.relPath)
-	}
-	return written, skipped, nil
-}

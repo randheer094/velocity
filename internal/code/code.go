@@ -149,8 +149,13 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 		return fmt.Errorf("branch: %w", err)
 	}
 
+	*stage = "render-prompt"
+	prompt, err := buildCodePrompt(issueKey, title, description)
+	if err != nil {
+		return fmt.Errorf("render code prompt: %w", err)
+	}
+
 	*stage = "code-llm"
-	prompt := buildCodePrompt(issueKey, title, description)
 	opts := llm.OptionsFromRoleConfig(cfg.LLM.Code, workspace)
 	if _, err := llm.RunPrompt(ctx, prompt, opts); err != nil {
 		return fmt.Errorf("code llm: %w", err)

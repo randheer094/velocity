@@ -118,8 +118,13 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		return fmt.Errorf("clone: %w", err)
 	}
 
+	*stage = "render-prompt"
+	prompt, err := buildArchPrompt(parentKey, requirement)
+	if err != nil {
+		return fmt.Errorf("render arch prompt: %w", err)
+	}
+
 	*stage = "arch-llm"
-	prompt := buildArchPrompt(parentKey, requirement)
 	opts := llm.OptionsFromRoleConfig(cfg.LLM.Arch, workspace)
 	output, err := llm.RunPrompt(ctx, prompt, opts)
 	if err != nil {

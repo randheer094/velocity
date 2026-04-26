@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/randheer094/velocity/internal/config"
+	"github.com/randheer094/velocity/internal/prompts"
 	"github.com/randheer094/velocity/internal/server"
 )
 
@@ -28,6 +29,23 @@ func requireConfig() error {
 	return fmt.Errorf("velocity is not configured: write %s (see config.example.yaml)", config.ConfigPath())
 }
 
+// requireResources verifies the resources cache is present and the
+// prompt manifest loads. The daemon refuses to start without prompts —
+// there are no in-binary fallbacks.
+func requireResources() error {
+	cfg := config.Get()
+	if cfg == nil {
+		return errors.New("config not loaded")
+	}
+	if cfg.Resources.RepoSlug == "" || cfg.Resources.Version == "" {
+		return fmt.Errorf("resources not configured. Run `velocity setup` first.")
+	}
+	if err := prompts.Load(config.ResourcesDir()); err != nil {
+		return fmt.Errorf("%w\nResources missing or stale. Run `velocity setup` first.", err)
+	}
+	return nil
+}
+
 func newStartCmd() *cobra.Command {
 	var foreground bool
 	cmd := &cobra.Command{
@@ -35,6 +53,9 @@ func newStartCmd() *cobra.Command {
 		Short: "Run the webhook server (detached by default)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireConfig(); err != nil {
+				return err
+			}
+			if err := requireResources(); err != nil {
 				return err
 			}
 			if foreground || os.Getenv(daemonEnvMarker) == "1" {
@@ -71,6 +92,9 @@ func newRestartCmd() *cobra.Command {
 		Short: "Stop then start the daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireConfig(); err != nil {
+				return err
+			}
+			if err := requireResources(); err != nil {
 				return err
 			}
 			if pid, _ := readPid(); pid != 0 {
