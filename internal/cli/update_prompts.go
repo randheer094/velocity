@@ -48,6 +48,7 @@ func newUpdatePromptsCmd() *cobra.Command {
 				}
 				tag = latest
 			}
+			tag = resources.CanonicalTag(tag)
 			// CheckMajor is redundant when LatestForMajor picked the
 			// tag (which only returns matching majors), but it's the
 			// single gate for an explicit user-supplied tag — keep

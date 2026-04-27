@@ -46,6 +46,9 @@ func newSetupCmd() *cobra.Command {
 				}
 				repoSlug = prompted
 			}
+			if looksLikeURL(repoSlug) {
+				fmt.Fprintln(out, "  (note: stripping URL prefix — repo_slug is stored as <owner>/<repo>)")
+			}
 			repoSlug, err := normalizeRepoSlug(repoSlug)
 			if err != nil {
 				return err
@@ -62,6 +65,7 @@ func newSetupCmd() *cobra.Command {
 			if tag == "" {
 				return fmt.Errorf("version is required")
 			}
+			tag = resources.CanonicalTag(tag)
 			if err := resources.CheckMajor(tag, prompts.MajorVersion); err != nil {
 				return err
 			}
@@ -129,11 +133,14 @@ func promptString(in *bufio.Reader, out io.Writer, label, def string) (string, e
 	if line == "" {
 		return def, nil
 	}
-	// Warn the caller when the input looks URL-shaped. The actual
-	// stripping happens in normalizeRepoSlug; this only nudges the
-	// user before we silently accept their copy-paste.
-	if strings.Contains(line, "github.com/") || strings.HasPrefix(line, "http") {
-		fmt.Fprintln(out, "  (note: stripping URL prefix — repo_slug is stored as <owner>/<repo>)")
-	}
 	return line, nil
+}
+
+// looksLikeURL is the heuristic used to surface a "stripping URL
+// prefix" warning when a user pastes a github.com URL into the slug
+// prompt instead of the bare <owner>/<repo>. Centralised here so
+// `--repo` flag input goes through the same nudge.
+func looksLikeURL(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://") || strings.HasPrefix(t, "github.com/")
 }

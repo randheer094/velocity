@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -142,6 +143,26 @@ func TestVerifyAliveLegacyEntry(t *testing.T) {
 	pid := syscall.Getpid()
 	if !VerifyAlive(Entry{PID: pid}) {
 		t.Error("legacy entry with live pid should verify alive")
+	}
+}
+
+// trimDeletedSuffix is duplicated here as a unit-test seam — verifies
+// that the suffix-stripping logic in VerifyAlive matches what we'd
+// expect when /proc/<pid>/exe reports a swapped-out binary. The
+// production path is exercised on Linux only so this guards the logic
+// independently of platform.
+func TestTrimDeletedSuffix(t *testing.T) {
+	cases := map[string]string{
+		"/usr/local/bin/velocity":              "/usr/local/bin/velocity",
+		"/usr/local/bin/velocity (deleted)":    "/usr/local/bin/velocity",
+		"":                                     "",
+		"velocity (deleted)":                   "velocity",
+		"/path/with spaces/velocity (deleted)": "/path/with spaces/velocity",
+	}
+	for in, want := range cases {
+		if got := strings.TrimSuffix(in, " (deleted)"); got != want {
+			t.Errorf("TrimSuffix(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

@@ -116,5 +116,11 @@ func VerifyAlive(e Entry) bool {
 		// back to the Kill(0) result rather than erroring out.
 		return true
 	}
-	return link == e.ExePath
+	// When the binary on disk is replaced (e.g. `cp velocity ...`
+	// while a daemon is running), the kernel marks the exe link as
+	// "<original-path> (deleted)". Strip the suffix so an in-place
+	// upgrade doesn't false-negative — the running process is still
+	// the velocity binary the pidfile recorded, just the on-disk
+	// inode has been swapped out.
+	return strings.TrimSuffix(link, " (deleted)") == e.ExePath
 }

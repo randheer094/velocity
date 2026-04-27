@@ -75,6 +75,22 @@ func (r Release) DownloadURL(asset string) string {
 	return fmt.Sprintf("%s/%s/releases/download/%s/%s", DownloadBase, r.RepoSlug, r.Tag, asset)
 }
 
+// CanonicalTag normalises a user-typed tag to the canonical
+// "v"-prefixed form. The release-asset URL pattern (and check-major.sh)
+// require this prefix, so a user who types "0.6.0" without it would
+// otherwise hit a 404 on download. Whitespace is trimmed; an already
+// canonical input is returned unchanged.
+func CanonicalTag(tag string) string {
+	t := strings.TrimSpace(tag)
+	if t == "" {
+		return ""
+	}
+	if !strings.HasPrefix(t, "v") {
+		t = "v" + t
+	}
+	return t
+}
+
 // MajorOf parses the leading numeric component of a tag like "v1.2.3"
 // or "1.2.3". Returns an error for unparseable tags.
 func MajorOf(tag string) (int, error) {
@@ -387,24 +403,30 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 	}
 
 	// Backup-then-swap: if a previous resources dir exists, move it
-	// aside first; if the new rename fails, restore the backup so the
-	// caller never observes a missing destDir. Rename over a non-empty
-	// dir is not portable on all platforms, so we always remove first.
-	backupDir := ""
+	// to a sibling .bak path before the new rename. The backup lives
+	// OUTSIDE tmpDir on purpose — `defer os.RemoveAll(tmpDir)` would
+	// otherwise delete it after a double-rename failure, leaving the
+	// operator with no resources at all. .bak is removed only on the
+	// happy path or after a successful restore.
+	backupDir := destDir + ".bak"
+	_ = os.RemoveAll(backupDir) // clean stragglers from a prior crash
+	hadExisting := false
 	if _, err := os.Stat(destDir); err == nil {
-		backupDir = filepath.Join(tmpDir, "backup")
 		if err := os.Rename(destDir, backupDir); err != nil {
 			return fmt.Errorf("backup existing resources: %w", err)
 		}
+		hadExisting = true
 	}
 	if err := os.Rename(stagingDir, destDir); err != nil {
-		if backupDir != "" {
-			// Best-effort restore; if even this fails the operator
-			// has the previous cache in tmpDir/backup until process
-			// exit cleans tmpDir.
-			_ = os.Rename(backupDir, destDir)
+		if hadExisting {
+			if restoreErr := os.Rename(backupDir, destDir); restoreErr != nil {
+				return fmt.Errorf("install: %w; restore from %s also failed: %v", err, backupDir, restoreErr)
+			}
 		}
 		return fmt.Errorf("install: %w", err)
+	}
+	if hadExisting {
+		_ = os.RemoveAll(backupDir)
 	}
 	return nil
 }

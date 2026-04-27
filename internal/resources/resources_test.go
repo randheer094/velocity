@@ -72,6 +72,23 @@ func startReleaseServer(t *testing.T, repoSlug, tag string, files map[string]str
 	return srv
 }
 
+func TestCanonicalTag(t *testing.T) {
+	cases := map[string]string{
+		"v0.6.0":     "v0.6.0",
+		"0.6.0":      "v0.6.0",
+		" v0.6.0 ":   "v0.6.0",
+		"v0.6.0-rc1": "v0.6.0-rc1",
+		"0.6.0-rc1":  "v0.6.0-rc1",
+		"":           "",
+		"   ":        "",
+	}
+	for in, want := range cases {
+		if got := CanonicalTag(in); got != want {
+			t.Errorf("CanonicalTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestMajorOf(t *testing.T) {
 	cases := map[string]struct {
 		want int
