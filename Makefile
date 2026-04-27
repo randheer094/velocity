@@ -3,14 +3,11 @@
 BINARY := velocity
 INSTALL_DIR ?= $(HOME)/.local/bin
 
-# VERSION_TAG defaults to `git describe` (closest tag + dirty marker)
-# so local builds report something meaningful. CI / release builds
-# override this with the exact release tag.
-VERSION_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X github.com/randheer094/velocity/internal/version.Tag=$(VERSION_TAG)
-
+# Version comes from internal/version/VERSION via //go:embed; no
+# -ldflags wiring needed. The -s -w pair below strips the debug
+# symbol table for size — unrelated to versioning.
 build:
-	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/velocity
+	go build -ldflags="-s -w" -o $(BINARY) ./cmd/velocity
 
 install: build
 	mkdir -p $(INSTALL_DIR)

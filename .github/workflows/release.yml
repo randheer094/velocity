@@ -52,11 +52,7 @@ jobs:
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          go build \
-            -ldflags="-s -w -X github.com/randheer094/velocity/internal/version.Tag=$RELEASE_TAG" \
-            -o ${{ matrix.asset }} ./cmd/velocity
+        run: go build -ldflags="-s -w" -o ${{ matrix.asset }} ./cmd/velocity
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2

@@ -312,8 +312,16 @@ match the velocity binary's major (`velocity version` prints it);
 major mismatches (e.g. installing `v1.x` into a binary that supports
 `v0.x`) are rejected with `major mismatch: binary expects 0, requested 1`.
 The release-binary CI also gates on this — a `vX.Y.Z` release tag
-whose major doesn't match the source-code `version.Major` constant
-fails the release build.
+that disagrees with `internal/version/VERSION` or with the
+`const Major` declared in `internal/version/version.go` fails the
+release build.
+
+Cutting a release: bump `internal/version/VERSION` (and
+`const Major` in `internal/version/version.go` if the major changed)
+in the same commit you tag. The binary's version comes from that
+file via `//go:embed`, so any build path — `make build`, plain
+`go build ./cmd/velocity`, `go install`, the release CI — reports
+the same value.
 
 To upgrade or pin a different tag once the cache exists, use
 `velocity update-prompts`. Without an argument it queries the

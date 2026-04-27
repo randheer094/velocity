@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # fetch tags so `git describe` works
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -51,29 +49,14 @@ jobs:
           git -c user.name=velocity-ci -c user.email=ci@velocity commit -q -m "coverage: ${pct}%"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" badges
 
-      - name: Resolve version tag
-        id: vtag
-        run: |
-          set -euo pipefail
-          TAG=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
       - name: cross-compile darwin/arm64
         env:
           GOOS: darwin
           GOARCH: arm64
-          VTAG: ${{ steps.vtag.outputs.tag }}
-        run: |
-          go build \
-            -ldflags="-s -w -X github.com/randheer094/velocity/internal/version.Tag=$VTAG" \
-            -o /tmp/velocity-arm64 ./cmd/velocity
+        run: go build -ldflags="-s -w" -o /tmp/velocity-arm64 ./cmd/velocity
 
       - name: cross-compile darwin/amd64
         env:
           GOOS: darwin
           GOARCH: amd64
-          VTAG: ${{ steps.vtag.outputs.tag }}
-        run: |
-          go build \
-            -ldflags="-s -w -X github.com/randheer094/velocity/internal/version.Tag=$VTAG" \
-            -o /tmp/velocity-amd64 ./cmd/velocity
+        run: go build -ldflags="-s -w" -o /tmp/velocity-amd64 ./cmd/velocity

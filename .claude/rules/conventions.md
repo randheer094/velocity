@@ -17,6 +17,9 @@ schema, code PR body, branch naming) live beside the agent code.
 - IDs are Jira issue keys. Plans key on parent key; `code_tasks`
   rows key on sub-task key; workspaces named `workspace/<KEY>/`.
   Git branches **must** equal the sub-task key exactly.
+- Binary version comes from `internal/version/VERSION` via
+  `//go:embed`. Bump that file (and `const Major` in `version.go`
+  when the major changes) in the same commit you tag.
 
 ## Scope (do not re-introduce)
 
