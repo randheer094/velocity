@@ -23,10 +23,13 @@ schema, code PR body, branch naming) live beside the agent code.
 - Schedulers, tickers, polling loops, filesystem queues.
 - Manual task-create endpoints, a web UI, or any HTTP setup surface.
 - Per-agent binaries, subprocess workers, `cmd/<other>/` binaries.
+  (Exception: `cmd/print-version-major` exists only so the release
+  CI gate can read `version.Major` without grepping source.)
 - New shared `internal/` packages beyond the existing set —
   `arch`, `cli`, `code`, `config`, `data`, `db`, `git`, `github`,
-  `jira`, `llm`, `prompts`, `resources`, `server`, `status`,
-  `webhook`. New shared concerns extend an existing package.
+  `jira`, `llm`, `pidfile`, `prompts`, `resources`, `server`,
+  `status`, `version`, `webhook`. New shared concerns extend an
+  existing package.
 - Per-agent config files or on-disk secret stores.
 
 New features belong in `internal/arch/`, `internal/code/`, or an

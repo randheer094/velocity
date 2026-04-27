@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,24 +245,36 @@ func TestSetForTestAndReset(t *testing.T) {
 
 func TestSetForTestRejectsBadTemplate(t *testing.T) {
 	defer resetForTest()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic from Fatalf")
-		}
-	}()
-	SetForTest(panicT{}, map[string]string{
+	rt := &recordingT{}
+	SetForTest(rt, map[string]string{
 		"bad": "{{.Unclosed",
 	})
+	if rt.fatal == "" {
+		t.Fatal("expected SetForTest to call Fatalf on bad template")
+	}
+	if !strings.Contains(rt.fatal, "parse fixture") {
+		t.Errorf("Fatalf message = %q, want it to mention 'parse fixture'", rt.fatal)
+	}
 }
 
-// panicT mirrors enough of testing.T for SetForTest to fail loudly.
-type panicT struct{}
-
-func (panicT) Helper() {}
-func (panicT) Fatalf(format string, args ...any) {
-	panic("fatal")
+// recordingT is a minimal TestingT that records the first Fatalf
+// message instead of aborting via t.FailNow / panic. Lets the test
+// assert directly on the captured message rather than relying on
+// panic-and-recover plumbing.
+type recordingT struct {
+	fatal    string
+	cleanups []func()
 }
-func (panicT) Cleanup(func()) {}
+
+func (r *recordingT) Helper() {}
+func (r *recordingT) Fatalf(format string, args ...any) {
+	if r.fatal == "" {
+		r.fatal = fmt.Sprintf(format, args...)
+	}
+}
+func (r *recordingT) Cleanup(fn func()) {
+	r.cleanups = append(r.cleanups, fn)
+}
 
 func TestLoadEmptyDir(t *testing.T) {
 	defer resetForTest()

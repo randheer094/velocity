@@ -52,6 +52,11 @@ func SetTimeout(seconds int) {
 	HTTPClient.Timeout = time.Duration(seconds) * time.Second
 }
 
+// SHASumName is the sibling checksum asset published alongside every
+// release tarball. The release workflow names it `SHA256SUMS` for
+// every velocity-resources release.
+const SHASumName = "SHA256SUMS"
+
 // Release identifies a velocity-resources tarball.
 type Release struct {
 	RepoSlug string
@@ -62,11 +67,6 @@ type Release struct {
 // "velocity-resources-v0.6.0.tar.gz".
 func (r Release) AssetName() string {
 	return "velocity-resources-" + r.Tag + ".tar.gz"
-}
-
-// SHASumName is the sibling SHA256SUMS asset.
-func (r Release) SHASumName() string {
-	return "SHA256SUMS"
 }
 
 // DownloadURL returns the absolute URL for an asset on the release
@@ -157,8 +157,11 @@ func LatestForMajor(ctx context.Context, repoSlug string, major int) (string, er
 	return matches[0].tag, nil
 }
 
-// download streams an asset to dst. dst is overwritten.
-func download(ctx context.Context, url, dst string) error {
+// download streams an asset to dst. dst is overwritten. The
+// destination file's Close error is surfaced when Copy succeeds —
+// flushing a buffered write can fail with ENOSPC after Copy returns,
+// and silently swallowing that would corrupt subsequent SHA verify.
+func download(ctx context.Context, url, dst string) (err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -175,7 +178,12 @@ func download(ctx context.Context, url, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		closeErr := f.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", dst, closeErr)
+		}
+	}()
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return err
 	}
@@ -330,12 +338,12 @@ func Install(ctx context.Context, rel Release, destDir string, expectedMajor int
 	defer os.RemoveAll(tmpDir)
 
 	tarPath := filepath.Join(tmpDir, rel.AssetName())
-	shaPath := filepath.Join(tmpDir, rel.SHASumName())
+	shaPath := filepath.Join(tmpDir, SHASumName)
 
 	if err := download(ctx, rel.DownloadURL(rel.AssetName()), tarPath); err != nil {
 		return err
 	}
-	if err := download(ctx, rel.DownloadURL(rel.SHASumName()), shaPath); err != nil {
+	if err := download(ctx, rel.DownloadURL(SHASumName), shaPath); err != nil {
 		return err
 	}
 

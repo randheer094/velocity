@@ -23,11 +23,13 @@ if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
   exit 1
 fi
 
-# Extract version.Major from internal/version/version.go. The constant
-# is on a single line: `const Major = N`.
-SRC_MAJOR=$(grep -E '^const Major = [0-9]+$' internal/version/version.go | awk '{print $4}')
-if [ -z "${SRC_MAJOR:-}" ]; then
-  echo "check-major: could not parse version.Major from internal/version/version.go" >&2
+# Extract version.Major by running a tiny Go program that imports the
+# version package and prints the constant. This is robust to any
+# reformatting of internal/version/version.go that a regex grep would
+# silently break on.
+SRC_MAJOR=$(go run ./cmd/print-version-major)
+if ! [[ "$SRC_MAJOR" =~ ^[0-9]+$ ]]; then
+  echo "check-major: could not extract version.Major (got: '$SRC_MAJOR')" >&2
   exit 1
 fi
 

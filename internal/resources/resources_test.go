@@ -435,8 +435,8 @@ func TestReleaseURLs(t *testing.T) {
 	if got := r.AssetName(); got != "velocity-resources-v0.6.0.tar.gz" {
 		t.Errorf("AssetName = %q", got)
 	}
-	if got := r.SHASumName(); got != "SHA256SUMS" {
-		t.Errorf("SHASumName = %q", got)
+	if SHASumName != "SHA256SUMS" {
+		t.Errorf("SHASumName const = %q", SHASumName)
 	}
 	prev := DownloadBase
 	DownloadBase = "https://example"

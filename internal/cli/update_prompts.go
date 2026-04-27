@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/randheer094/velocity/internal/config"
+	"github.com/randheer094/velocity/internal/pidfile"
 	"github.com/randheer094/velocity/internal/prompts"
 	"github.com/randheer094/velocity/internal/resources"
 )
@@ -68,19 +69,25 @@ func newUpdatePromptsCmd() *cobra.Command {
 
 			fmt.Fprintf(out, "Installed resources at %s\n", config.ResourcesDir())
 
-			pid, _ := readPid()
-			if pid == 0 {
+			entry, _ := pidfile.Read(config.PidfilePath())
+			if entry.PID == 0 || !pidfile.VerifyAlive(entry) {
+				// Pid recycling defence: even if the pidfile points at
+				// a live pid, VerifyAlive confirms it's still our
+				// velocity binary (Linux) before we send SIGHUP. A
+				// stale pidfile is removed so future invocations stop
+				// re-checking the same dead pid.
+				_ = pidfile.Remove(config.PidfilePath())
 				fmt.Fprintln(out, "daemon not running, restart to pick up changes")
 				return nil
 			}
-			if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+			if err := syscall.Kill(entry.PID, syscall.SIGHUP); err != nil {
 				if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 					fmt.Fprintln(out, "daemon not running, restart to pick up changes")
 					return nil
 				}
 				return fmt.Errorf("signal daemon: %w", err)
 			}
-			fmt.Fprintf(out, "daemon SIGHUP sent (pid %d)\n", pid)
+			fmt.Fprintf(out, "daemon SIGHUP sent (pid %d)\n", entry.PID)
 			return nil
 		},
 	}

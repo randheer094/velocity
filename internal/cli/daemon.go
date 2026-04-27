@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/randheer094/velocity/internal/config"
+	"github.com/randheer094/velocity/internal/pidfile"
 	"github.com/randheer094/velocity/internal/prompts"
 	"github.com/randheer094/velocity/internal/server"
 )
@@ -29,16 +28,33 @@ func requireConfig() error {
 	return fmt.Errorf("velocity is not configured: write %s (see config.example.yaml)", config.ConfigPath())
 }
 
-// requireResources verifies the resources cache is present and the
-// prompt manifest loads. The daemon refuses to start without prompts —
-// there are no in-binary fallbacks.
-func requireResources() error {
+// validateResources checks that the resources cache exists and that
+// `resources.repo_slug` / `resources.version` are set in config.yaml.
+// It does NOT call prompts.Load — the parent of a `velocity start`
+// invocation only needs the fast structural check; the daemon child
+// re-runs the gate via requireResources and actually loads.
+//
+// Callers must invoke requireConfig first.
+func validateResources() error {
 	cfg := config.Get()
-	if cfg == nil {
-		return errors.New("config not loaded")
-	}
 	if cfg.Resources.RepoSlug == "" || cfg.Resources.Version == "" {
-		return fmt.Errorf("resources not configured; run `velocity setup` first")
+		return errors.New("resources not configured; run `velocity setup` first")
+	}
+	if _, err := os.Stat(config.ResourcesDir()); err != nil {
+		return fmt.Errorf("%w; run `velocity setup` first", err)
+	}
+	return nil
+}
+
+// requireResources extends validateResources with a full prompts.Load.
+// Used on the daemon hot path so the manifest + every template is
+// parsed before the HTTP listener comes up; failures abort start with
+// a hint to re-run `velocity setup`.
+//
+// Callers must invoke requireConfig first.
+func requireResources() error {
+	if err := validateResources(); err != nil {
+		return err
 	}
 	if err := prompts.Load(config.ResourcesDir()); err != nil {
 		return fmt.Errorf("%w; resources missing or stale, run `velocity setup` first", err)
@@ -55,11 +71,18 @@ func newStartCmd() *cobra.Command {
 			if err := requireConfig(); err != nil {
 				return err
 			}
-			if err := requireResources(); err != nil {
-				return err
-			}
-			if foreground || os.Getenv(daemonEnvMarker) == "1" {
+			isServerProcess := foreground || os.Getenv(daemonEnvMarker) == "1"
+			if isServerProcess {
+				if err := requireResources(); err != nil {
+					return err
+				}
 				return server.Run()
+			}
+			// Parent of a detach: only structural validation. The
+			// child process loads prompts itself, so loading them
+			// here would just throw the result away.
+			if err := validateResources(); err != nil {
+				return err
 			}
 			return detach()
 		},
@@ -73,15 +96,16 @@ func newStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the running daemon (SIGTERM, SIGKILL after 10s)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, err := readPid()
+			entry, err := pidfile.Read(config.PidfilePath())
 			if err != nil {
 				return err
 			}
-			if pid == 0 {
+			if entry.PID == 0 || !pidfile.VerifyAlive(entry) {
+				_ = pidfile.Remove(config.PidfilePath())
 				fmt.Println("stopped")
 				return nil
 			}
-			return stop(pid)
+			return stop(entry.PID)
 		},
 	}
 }
@@ -94,13 +118,15 @@ func newRestartCmd() *cobra.Command {
 			if err := requireConfig(); err != nil {
 				return err
 			}
-			if err := requireResources(); err != nil {
+			if err := validateResources(); err != nil {
 				return err
 			}
-			if pid, _ := readPid(); pid != 0 {
-				if err := stop(pid); err != nil {
+			if entry, _ := pidfile.Read(config.PidfilePath()); entry.PID != 0 && pidfile.VerifyAlive(entry) {
+				if err := stop(entry.PID); err != nil {
 					return err
 				}
+			} else {
+				_ = pidfile.Remove(config.PidfilePath())
 			}
 			return detach()
 		},
@@ -112,44 +138,43 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Print running/stopped and exit 0 if running",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, _ := readPid()
-			if pid == 0 {
+			entry, _ := pidfile.Read(config.PidfilePath())
+			if entry.PID == 0 || !pidfile.VerifyAlive(entry) {
+				_ = pidfile.Remove(config.PidfilePath())
 				fmt.Println("stopped")
 				os.Exit(1)
 				return nil
 			}
-			if err := syscall.Kill(pid, 0); err != nil {
-				fmt.Println("stopped")
-				_ = os.Remove(config.PidfilePath())
-				os.Exit(1)
-				return nil
-			}
-			fmt.Printf("running (pid %d)\n", pid)
+			fmt.Printf("running (pid %d)\n", entry.PID)
 			return nil
 		},
 	}
-}
-
-func readPid() (int, error) {
-	data, err := os.ReadFile(config.PidfilePath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid pidfile: %w", err)
-	}
-	return pid, nil
 }
 
 func writePid(pid int) error {
 	if err := config.EnsureDir(); err != nil {
 		return err
 	}
-	return os.WriteFile(config.PidfilePath(), []byte(strconv.Itoa(pid)), 0o644)
+	exe, err := os.Executable()
+	if err != nil {
+		// Fall back to a legacy-format pidfile so stop/status still
+		// work; the exe-fingerprint check in VerifyAlive becomes a
+		// no-op for this entry.
+		exe = ""
+	}
+	return pidfile.Write(config.PidfilePath(), pidfile.Entry{PID: pid, ExePath: exe})
+}
+
+// readPid is a thin shim around pidfile.Read kept for the older
+// internal call sites (and tests that pre-date the pidfile package).
+// New code should prefer pidfile.Read directly so it can also reach
+// the ExePath field for VerifyAlive.
+func readPid() (int, error) {
+	entry, err := pidfile.Read(config.PidfilePath())
+	if err != nil {
+		return 0, err
+	}
+	return entry.PID, nil
 }
 
 func stop(pid int) error {
@@ -159,14 +184,14 @@ func stop(pid int) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := syscall.Kill(pid, 0); err != nil {
-			_ = os.Remove(config.PidfilePath())
+			_ = pidfile.Remove(config.PidfilePath())
 			fmt.Println("stopped")
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	_ = syscall.Kill(pid, syscall.SIGKILL)
-	_ = os.Remove(config.PidfilePath())
+	_ = pidfile.Remove(config.PidfilePath())
 	fmt.Println("stopped (SIGKILL)")
 	return nil
 }
