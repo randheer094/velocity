@@ -52,15 +52,16 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.Handle("POST /webhook/jira", webhook.JiraHandler{})
 	mux.Handle("POST /webhook/github", webhook.GithubHandler{})
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
+	mux.HandleFunc("GET /healthz", healthz)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
@@ -100,4 +101,28 @@ func Run() error {
 	shutdownErr := srv.Shutdown(shutdownCtx)
 	webhook.Drain(shutdownCtx)
 	return shutdownErr
+}
+
+// healthz reports 200 only when the daemon has finished bringing up
+// every dependency a webhook needs: the DB pool is open and the work
+// queue is accepting jobs. A failed pool ping or a stopped queue
+// returns 503 so a load balancer can stop routing traffic.
+func healthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	pool := db.Shared()
+	if pool == nil {
+		http.Error(w, "db not started", http.StatusServiceUnavailable)
+		return
+	}
+	pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := pool.Ping(pingCtx); err != nil {
+		http.Error(w, "db ping failed", http.StatusServiceUnavailable)
+		return
+	}
+	if !webhook.Started() {
+		http.Error(w, "queue not started", http.StatusServiceUnavailable)
+		return
+	}
+	_, _ = w.Write([]byte("ok"))
 }

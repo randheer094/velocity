@@ -23,12 +23,14 @@ type Entry struct {
 }
 
 // Format renders an entry to the canonical on-disk shape: one line of
-// `<pid> <exe-path>`. ExePath may be empty.
+// `<pid>\t<exe-path>`. A tab separator round-trips paths that contain
+// spaces; legacy "<pid> <exe-path>" files are still accepted by Read.
+// ExePath may be empty.
 func (e Entry) Format() string {
 	if e.ExePath == "" {
 		return strconv.Itoa(e.PID)
 	}
-	return fmt.Sprintf("%d %s", e.PID, e.ExePath)
+	return fmt.Sprintf("%d\t%s", e.PID, e.ExePath)
 }
 
 // Read parses the pidfile at path. Missing file returns (Entry{}, nil)
@@ -47,20 +49,19 @@ func Read(path string) (Entry, error) {
 	if line == "" {
 		return Entry{}, fmt.Errorf("empty pidfile")
 	}
-	fields := strings.Fields(line)
-	pid, err := strconv.Atoi(fields[0])
+	// Split on the first whitespace run so a tab-delimited path with
+	// embedded spaces round-trips intact. Legacy single-space files
+	// also parse correctly because we still split on the first run.
+	pidStr, exePath, _ := strings.Cut(line, "\t")
+	if exePath == "" {
+		// Tab missing → legacy " " format. Fall back to first space.
+		pidStr, exePath, _ = strings.Cut(line, " ")
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
 	if err != nil {
 		return Entry{}, fmt.Errorf("invalid pidfile: %w", err)
 	}
-	e := Entry{PID: pid}
-	if len(fields) >= 2 {
-		// Re-join in case the path contained spaces — strings.Fields
-		// already split on every whitespace run, so we glue them
-		// back with a single space. Daemon paths shouldn't contain
-		// whitespace in practice, so this is defence in depth.
-		e.ExePath = strings.Join(fields[1:], " ")
-	}
-	return e, nil
+	return Entry{PID: pid, ExePath: strings.TrimSpace(exePath)}, nil
 }
 
 // Write atomically writes entry to path. Atomicity matters because
@@ -68,7 +69,7 @@ func Read(path string) (Entry, error) {
 // `velocity start`.
 func Write(path string, entry Entry) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(entry.Format()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(entry.Format()), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

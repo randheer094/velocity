@@ -204,7 +204,7 @@ func detach() error {
 	if err != nil {
 		return err
 	}
-	logfile, err := os.OpenFile(config.LogfilePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logfile, err := os.OpenFile(config.LogfilePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

@@ -201,6 +201,32 @@ func TestConfigureAuthenticatedRemoteWithToken(t *testing.T) {
 	if err := ConfigureAuthenticatedRemote(dst, "owner/repo"); err != nil {
 		t.Errorf("ConfigureAuthenticatedRemote: %v", err)
 	}
+	// The token must never be embedded in .git/config — that file is
+	// readable by other local users and survives a workspace tarball.
+	out, err := exec.Command("git", "-C", dst, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git remote get-url: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "abc") {
+		t.Errorf("origin URL leaked GH_TOKEN: %s", out)
+	}
+}
+
+// TestPushErrorRedactsToken proves that even when push fails, a
+// GH_TOKEN from the environment never appears in the returned error.
+// Earlier versions embedded the token in the origin URL and joined
+// args into the error string, leaking it through daemon.log and Jira
+// failure comments.
+func TestPushErrorRedactsToken(t *testing.T) {
+	const token = "ghp_topsecret_must_not_leak"
+	t.Setenv(config.GithubTokenEnv, token)
+	err := Push(t.TempDir(), "feat")
+	if err == nil {
+		t.Fatal("expected push to fail in non-repo dir")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("push error leaked token: %v", err)
+	}
 }
 
 func TestWorkspaceExists(t *testing.T) {

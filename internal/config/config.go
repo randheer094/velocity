@@ -385,7 +385,7 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(ConfigPath(), data, 0o644); err != nil {
+	if err := os.WriteFile(ConfigPath(), data, 0o600); err != nil {
 		return err
 	}
 	current = cfg

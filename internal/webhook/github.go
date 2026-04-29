@@ -29,9 +29,14 @@ func (h GithubHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !Started() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "reason": "queue not started"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWebhookBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "read body", http.StatusBadRequest)
+		http.Error(w, "read body", http.StatusRequestEntityTooLarge)
 		return
 	}
 	secret := os.Getenv(config.GithubWebhookSecretEnv)

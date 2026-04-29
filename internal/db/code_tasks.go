@@ -74,8 +74,13 @@ func SaveCodeTask(ctx context.Context, t *data.CodeTask) error {
 }
 
 // MarkCodeFailed upserts a minimal row if the task is absent.
+// A read error short-circuits so a transient DB failure can't blow
+// away an existing row's PR URL or prior status with a fresh upsert.
 func MarkCodeFailed(ctx context.Context, issueKey, parentKey, repoURL, title, branch, jiraStatus, stage, errMsg string) error {
-	t, _ := GetCodeTask(ctx, issueKey)
+	t, err := GetCodeTask(ctx, issueKey)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if t == nil {
 		t = &data.CodeTask{

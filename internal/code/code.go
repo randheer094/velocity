@@ -87,7 +87,11 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "retry-guard"
 	forcePush := false
-	if existing, _ := db.GetCodeTask(ctx, issueKey); existing != nil {
+	existing, err := db.GetCodeTask(ctx, issueKey)
+	if err != nil {
+		return fmt.Errorf("retry guard: %w", err)
+	}
+	if existing != nil {
 		switch existing.Status {
 		case data.CodeDone, data.CodeInReview:
 			slog.Info("code: task already terminal or in review, ignoring re-assignment", "key", issueKey, "status", existing.Status)
@@ -116,7 +120,9 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "transition-coding"
 	if coding := status.SubtaskJiraName(status.Coding); coding != "" {
-		jiraClient.Transition(issueKey, coding)
+		if !jiraClient.Transition(issueKey, coding) {
+			slog.Error("code: transition to coding failed", "key", issueKey, "target", coding)
+		}
 	}
 
 	*stage = "parse-repo-url"
@@ -208,7 +214,9 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "transition-in-review"
 	if task.JiraStatus != "" {
-		jiraClient.Transition(issueKey, task.JiraStatus)
+		if !jiraClient.Transition(issueKey, task.JiraStatus) {
+			slog.Error("code: transition to in-review failed", "key", issueKey, "target", task.JiraStatus)
+		}
 	}
 
 	slog.Info("code: PR open", "key", issueKey, "url", prURL)
@@ -230,14 +238,19 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 	if !client.Transition(issueKey, done) {
 		return fmt.Errorf("failed to transition %s to %s", issueKey, done)
 	}
-	task, _ := db.GetCodeTask(ctx, issueKey)
+	task, err := db.GetCodeTask(ctx, issueKey)
+	if err != nil {
+		return fmt.Errorf("get task on merge: %w", err)
+	}
 	if task != nil {
 		task.Status = data.CodeDone
 		task.JiraStatus = done
 		if prURL != "" {
 			task.PRURL = prURL
 		}
-		_ = db.SaveCodeTask(ctx, task)
+		if err := db.SaveCodeTask(ctx, task); err != nil {
+			return fmt.Errorf("save task on merge: %w", err)
+		}
 	}
 	EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
 		map[string]any{"issue_key": issueKey})

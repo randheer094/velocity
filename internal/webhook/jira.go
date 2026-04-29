@@ -17,6 +17,12 @@ import (
 // X-Hub-Signature-256 — only the header name differs.
 const jiraSignatureHeader = "X-Hub-Signature"
 
+// MaxWebhookBody caps the request body the handlers will read. Real
+// Jira / GitHub webhook payloads sit well under 1 MB; the cap is
+// generous enough to cover oddball ADF descriptions while preventing
+// memory exhaustion from a malicious or misconfigured sender.
+const MaxWebhookBody = 5 << 20
+
 // MaxRequirementChars caps the summary+description text handed to the
 // architect LLM. Sized to stay well within the Claude Code 250K-token
 // context window after reserving room for the system prompt, tool
@@ -52,9 +58,14 @@ func (h JiraHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "reason": "setup required"})
 		return
 	}
+	if !Started() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "reason": "queue not started"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWebhookBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "read body", http.StatusBadRequest)
+		http.Error(w, "read body", http.StatusRequestEntityTooLarge)
 		return
 	}
 	secret := os.Getenv(config.JiraWebhookSecretEnv)

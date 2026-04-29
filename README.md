@@ -128,8 +128,9 @@ Secrets are **never** in `config.yaml` — export them before
 | `VELOCITY_DB_USER` | yes | Postgres user. |
 | `VELOCITY_DB_PASSWORD` | yes | Postgres password. |
 | `VELOCITY_DB_NAME` | yes | Postgres database name. |
-| `JIRA_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature`. Unset disables verification (dev only). |
-| `GH_WEBHOOK_SECRET` | no | Shared secret for `X-Hub-Signature-256`. Unset disables verification (dev only). |
+| `JIRA_WEBHOOK_SECRET` | yes (prod) | Shared secret for `X-Hub-Signature`. Unset rejects every request unless `VELOCITY_INSECURE_WEBHOOKS=1`. |
+| `GH_WEBHOOK_SECRET` | yes (prod) | Shared secret for `X-Hub-Signature-256`. Unset rejects every request unless `VELOCITY_INSECURE_WEBHOOKS=1`. |
+| `VELOCITY_INSECURE_WEBHOOKS` | no | Set to `1` to accept unsigned webhooks (local dev with `cloudflared` / `ngrok`). Never set in production. |
 
 Example:
 
@@ -673,8 +674,10 @@ Traefik) and terminate TLS there. Local dev: tunnel with
 | `velocity status` says stopped right after `start` | `velocity logs` — usually a config load or DB connection error. |
 | `config.yaml not found` | Copy `config.example.yaml` to `~/.velocity/config.yaml` and edit. |
 | DB connection fails | Verify the full `VELOCITY_DB_*` set is exported; check `docker compose ps postgres`. |
-| Jira webhook returns 401 | `JIRA_WEBHOOK_SECRET` mismatch. Re-export and restart; confirm the same value is set on the Jira webhook. |
+| Jira webhook returns 401 | `JIRA_WEBHOOK_SECRET` mismatch or unset. Re-export and restart; confirm the same value is set on the Jira webhook. For local dev only, `export VELOCITY_INSECURE_WEBHOOKS=1` to bypass HMAC entirely. |
 | GitHub webhook returns 401 | Same as above for `GH_WEBHOOK_SECRET`. |
+| Webhook returns 503 (`queue not started`) | Daemon is in startup or shutdown; retry. The same code is returned by `/healthz` if the DB pool is down — check `velocity logs` for `db ping failed`. |
+| Webhook returns 413 | Payload exceeds the 5 MiB cap; check the sender (Jira ADF descriptions are usually under 1 MiB; GitHub log payloads are bounded). |
 | Parent stuck in `PLANNING` | Look for `arch: stage failed` in `daemon.log`. Ticket should have been moved to `PLANNING_FAILED` with a comment. |
 | Sub-task PR never opens | `code: stage failed`; usually a `git push` auth failure or a Claude timeout. Bump `llm.code.timeout_sec`. |
 | Queue drops under load | `SELECT queue, status, count(*) FROM webhook_jobs GROUP BY 1, 2;` — if pending is near `server.queue_size`, raise the cap. If the LLM queue is the saturated one, also raise `server.max_concurrency`; the ops worker is always 1. |

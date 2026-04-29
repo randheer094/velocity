@@ -82,14 +82,33 @@ func TestEnsureDir(t *testing.T) {
 }
 
 func TestExpandHome(t *testing.T) {
-	if got := expandHome(""); got != "" {
-		t.Errorf("empty path expanded to %q", got)
+	got, err := expandHome("")
+	if err != nil || got != "" {
+		t.Errorf("empty path expanded to %q (err=%v)", got, err)
 	}
-	if got := expandHome("/abs"); got != "/abs" {
-		t.Errorf("absolute path changed: %q", got)
+	got, err = expandHome("/abs")
+	if err != nil || got != "/abs" {
+		t.Errorf("absolute path changed: %q (err=%v)", got, err)
 	}
 	home, _ := os.UserHomeDir()
-	if got := expandHome("~/foo"); !strings.HasPrefix(got, home) {
-		t.Errorf("~ not expanded: %q", got)
+	got, err = expandHome("~/foo")
+	if err != nil || !strings.HasPrefix(got, home) {
+		t.Errorf("~ not expanded: %q (err=%v)", got, err)
+	}
+}
+
+func TestExpandHomeError(t *testing.T) {
+	t.Setenv("HOME", "")
+	// On non-Linux, os.UserHomeDir consults different env vars; this
+	// test is best-effort. Skip if HOME being empty doesn't fail.
+	if _, err := expandHome("~/foo"); err == nil {
+		t.Skip("UserHomeDir returned a path even with HOME unset")
+	}
+}
+
+func TestSetDirReturnsErrorOnHomeFailure(t *testing.T) {
+	t.Setenv("HOME", "")
+	if err := SetDir("~/something"); err == nil {
+		t.Skip("UserHomeDir returned a path even with HOME unset")
 	}
 }

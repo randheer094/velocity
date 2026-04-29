@@ -23,15 +23,29 @@ var (
 )
 
 func init() {
-	SetDir(defaultAgentDir)
+	if err := SetDir(defaultAgentDir); err != nil {
+		// init runs before any caller can recover; fall back to a
+		// safe-but-unusable empty path so a missing $HOME doesn't
+		// crash the binary on import. Subcommands that actually need
+		// the dir will fail loudly via requireConfig.
+		AgentDir = ""
+		WorkspaceDir = ""
+	}
 }
 
-// SetDir points velocity at a new data directory and reloads the config.
-func SetDir(path string) {
-	AgentDir = expandHome(path)
+// SetDir points velocity at a new data directory and reloads the
+// config. Returns an error if the path can't be resolved (e.g. "~"
+// expansion fails because $HOME is unset).
+func SetDir(path string) error {
+	expanded, err := expandHome(path)
+	if err != nil {
+		return err
+	}
+	AgentDir = expanded
 	WorkspaceDir = filepath.Join(AgentDir, workspaceSubdir)
 
 	loadConfig()
+	return nil
 }
 
 func ConfigPath() string  { return filepath.Join(AgentDir, configFilename) }
@@ -69,13 +83,13 @@ func EnsureDir() error {
 	return os.MkdirAll(AgentDir, 0o755)
 }
 
-func expandHome(path string) string {
+func expandHome(path string) (string, error) {
 	if len(path) == 0 || path[0] != '~' {
-		return path
+		return path, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return path
+		return "", err
 	}
-	return filepath.Join(home, path[1:])
+	return filepath.Join(home, path[1:]), nil
 }

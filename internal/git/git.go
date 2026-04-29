@@ -12,22 +12,63 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 )
 
+// run executes git with GIT_TERMINAL_PROMPT=0 so a missing or invalid
+// credential never blocks waiting on stdin. Errors include the args
+// (never the env), so a token injected via runAuthed cannot leak.
+// stderr is redacted on the off chance git echoes it.
 func run(dir string, args ...string) (string, error) {
+	return runEnv(dir, nil, args...)
+}
+
+func runEnv(dir string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Env, extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return stdout.String(), fmt.Errorf("git %s: %w; stderr=%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		stderrText := redactSecrets(strings.TrimSpace(stderr.String()))
+		return stdout.String(), fmt.Errorf("git %s: %w; stderr=%s", strings.Join(args, " "), err, stderrText)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// runAuthed runs git with GH_TOKEN injected via env-based config so
+// the token never appears in cmd.Args (and therefore never in any
+// error string). Falls through to plain run when GH_TOKEN is unset
+// so anonymous operations against public remotes keep working.
+func runAuthed(dir string, args ...string) (string, error) {
+	token := os.Getenv(config.GithubTokenEnv)
+	if token == "" {
+		return run(dir, args...)
+	}
+	env := []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=Authorization: bearer " + token,
+	}
+	return runEnv(dir, env, args...)
+}
+
+// redactSecrets is a best-effort scrubber for tokens that may appear in
+// git stderr (e.g. "fatal: Authentication failed for 'https://...'").
+// Even though the token is never in cmd.Args, defence in depth.
+func redactSecrets(s string) string {
+	if s == "" {
+		return s
+	}
+	if t := os.Getenv(config.GithubTokenEnv); t != "" {
+		s = strings.ReplaceAll(s, t, "[REDACTED]")
+	}
+	return s
+}
+
 func Clone(repoURL, dst string) error {
-	_, err := run("", "clone", repoURL, dst)
+	_, err := runAuthed("", "clone", repoURL, dst)
 	return err
 }
 
@@ -43,16 +84,19 @@ func DefaultBranch(repoDir string) (string, error) {
 	return out, nil
 }
 
-// ConfigureAuthenticatedRemote embeds GH_TOKEN in origin's URL so
-// `git push` runs non-interactively.
+// ConfigureAuthenticatedRemote verifies GH_TOKEN is exported so the
+// daemon fails fast instead of hitting an auth error mid-push. The
+// token itself is injected per-invocation via runAuthed (env-based
+// git config) — it is never written into .git/config or the origin
+// URL, so it cannot leak through a backed-up workspace or an error
+// string.
 func ConfigureAuthenticatedRemote(repoDir, repoFullName string) error {
-	token := os.Getenv(config.GithubTokenEnv)
-	if token == "" {
+	_ = repoDir
+	_ = repoFullName
+	if os.Getenv(config.GithubTokenEnv) == "" {
 		return fmt.Errorf("%s env var not set", config.GithubTokenEnv)
 	}
-	authURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", token, repoFullName)
-	_, err := run(repoDir, "remote", "set-url", "origin", authURL)
-	return err
+	return nil
 }
 
 // CheckoutNewBranch uses `checkout -B`: creates or resets branchName.
@@ -64,14 +108,14 @@ func CheckoutNewBranch(repoDir, branchName string) error {
 }
 
 func Push(repoDir, branchName string) error {
-	_, err := run(repoDir, "push", "-u", "origin", branchName)
+	_, err := runAuthed(repoDir, "push", "-u", "origin", branchName)
 	return err
 }
 
 // FetchAll updates every remote ref so RebaseOnto and CheckoutBranch
 // can see the latest origin state.
 func FetchAll(repoDir string) error {
-	_, err := run(repoDir, "fetch", "--all", "--prune")
+	_, err := runAuthed(repoDir, "fetch", "--all", "--prune")
 	return err
 }
 
@@ -108,7 +152,7 @@ func WorkspaceExists(repoDir string) bool {
 // PushForceWithLease refreshes an existing PR branch on code retry;
 // fails rather than clobbers if the remote has moved.
 func PushForceWithLease(repoDir, branchName string) error {
-	_, err := run(repoDir, "push", "--force-with-lease", "-u", "origin", branchName)
+	_, err := runAuthed(repoDir, "push", "--force-with-lease", "-u", "origin", branchName)
 	return err
 }
 
