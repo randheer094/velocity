@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -127,6 +128,16 @@ func Enqueue(kind, name string, payload any) {
 	slog.Info("workqueue: enqueued", "id", id, "queue", queue, "kind", kind, "name", name)
 }
 
+// Started reports whether Start has run and Drain hasn't. Used by
+// /healthz so a load balancer can stop routing during shutdown, and
+// by the webhook handlers to fail fast rather than enqueue into a
+// queue that nobody is draining.
+func Started() bool {
+	queueMu.Lock()
+	defer queueMu.Unlock()
+	return queueStart
+}
+
 // Drain cancels the pollers and waits for in-flight jobs. Returns
 // early if ctx fires first (shutdown budget).
 func Drain(ctx context.Context) {
@@ -184,7 +195,8 @@ func runJob(ctx context.Context, id int64, kind, name string, payload []byte) {
 		defer func() {
 			if r := recover(); r != nil {
 				dispatchErr = panicError(r)
-				slog.Error("workqueue: job panic", "id", id, "name", name, "panic", r)
+				slog.Error("workqueue: job panic",
+					"id", id, "name", name, "panic", r, "stack", string(debug.Stack()))
 			}
 		}()
 		dispatchErr = dispatch(ctx, kind, payload)

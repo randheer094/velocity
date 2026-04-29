@@ -55,6 +55,23 @@ func TestReadLegacyFormat(t *testing.T) {
 	}
 }
 
+// TestReadEntryNoExe covers the path where Write is called with an
+// empty ExePath and Read recovers a Pid-only entry.
+func TestReadEntryNoExe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pid")
+	if err := Write(path, Entry{PID: 7}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PID != 7 || got.ExePath != "" {
+		t.Errorf("got = %+v", got)
+	}
+}
+
 func TestReadEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pid")
@@ -96,11 +113,47 @@ func TestRemove(t *testing.T) {
 }
 
 func TestEntryFormat(t *testing.T) {
-	if got := (Entry{PID: 12, ExePath: "/x"}).Format(); got != "12 /x" {
+	if got := (Entry{PID: 12, ExePath: "/x"}).Format(); got != "12\t/x" {
 		t.Errorf("Format with exe = %q", got)
 	}
 	if got := (Entry{PID: 12}).Format(); got != "12" {
 		t.Errorf("Format without exe = %q", got)
+	}
+}
+
+// TestReadLegacySpaceFormat exercises the back-compat reader path for
+// pidfiles written by older daemons that used a single space between
+// pid and exe path. Read must accept either delimiter.
+func TestReadLegacySpaceFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pid")
+	if err := os.WriteFile(path, []byte("4242 /usr/local/bin/velocity\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read legacy space: %v", err)
+	}
+	if got.PID != 4242 || got.ExePath != "/usr/local/bin/velocity" {
+		t.Errorf("got = %+v", got)
+	}
+}
+
+// TestRoundTripPathWithSpaces is the new contract enabled by the tab
+// delimiter: a binary path containing spaces must round-trip cleanly.
+func TestRoundTripPathWithSpaces(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pid")
+	in := Entry{PID: 99, ExePath: "/Applications/My Velocity.app/velocity"}
+	if err := Write(path, in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != in {
+		t.Errorf("round-trip with spaces = %+v, want %+v", got, in)
 	}
 }
 
@@ -177,7 +230,7 @@ func TestWriteAtomic(t *testing.T) {
 		t.Errorf("tmpfile not cleaned up: %v", err)
 	}
 	data, _ := os.ReadFile(path)
-	if string(data) != "1 /x" {
+	if string(data) != "1\t/x" {
 		t.Errorf("written = %q", data)
 	}
 }

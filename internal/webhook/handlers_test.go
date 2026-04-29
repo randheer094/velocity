@@ -13,11 +13,15 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 )
 
-// Unset webhook secret env vars so tests default to HMAC-disabled.
-// Individual tests that exercise signature paths opt in via t.Setenv.
+// Unset webhook secret env vars so tests default to HMAC-disabled,
+// and opt into the dev-mode escape hatch so an empty secret accepts
+// (production code rejects empty secrets unless this env var is set).
+// Individual tests that exercise signature paths opt back into HMAC
+// via t.Setenv.
 func TestMain(m *testing.M) {
 	os.Unsetenv(config.JiraWebhookSecretEnv)
 	os.Unsetenv(config.GithubWebhookSecretEnv)
+	os.Setenv(InsecureWebhooksEnv, "1")
 	os.Exit(m.Run())
 }
 
@@ -101,6 +105,7 @@ func TestJiraHandlerNoConfig(t *testing.T) {
 func TestJiraHandlerInvalidJSON(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/jira", bytes.NewReader([]byte("not json")))
 	JiraHandler{}.ServeHTTP(rec, req)
@@ -112,6 +117,7 @@ func TestJiraHandlerInvalidJSON(t *testing.T) {
 func TestJiraHandlerMissingKey(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/jira",
 		bytes.NewReader([]byte(`{"webhookEvent":"x","issue":{"fields":{}}}`)))
@@ -124,6 +130,7 @@ func TestJiraHandlerMissingKey(t *testing.T) {
 func TestJiraHandlerIgnoredEvent(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/jira",
 		bytes.NewReader([]byte(`{"webhookEvent":"comment_created","issue":{"key":"PROJ-1","fields":{}}}`)))
@@ -661,6 +668,7 @@ func TestGithubHandlerWrongMethod(t *testing.T) {
 }
 
 func TestGithubHandlerIgnoredEvent(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("{}")))
 	req.Header.Set("X-GitHub-Event", "ping")
@@ -671,6 +679,7 @@ func TestGithubHandlerIgnoredEvent(t *testing.T) {
 }
 
 func TestGithubHandlerInvalidJSON(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("not json")))
 	req.Header.Set("X-GitHub-Event", "pull_request")
@@ -681,6 +690,7 @@ func TestGithubHandlerInvalidJSON(t *testing.T) {
 }
 
 func TestGithubHandlerNonMerged(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"closed","pull_request":{"merged":false,"head":{"ref":"feat"}}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
@@ -692,6 +702,7 @@ func TestGithubHandlerNonMerged(t *testing.T) {
 }
 
 func TestGithubHandlerNonJiraBranch(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"closed","pull_request":{"merged":true,"html_url":"u","head":{"ref":"feature/x"}}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
@@ -723,6 +734,7 @@ func TestGithubHandlerMergedJiraBranch(t *testing.T) {
 }
 
 func TestGithubHandlerWorkflowRunIgnoredConclusion(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"completed","workflow_run":{"conclusion":"success","head_branch":"PROJ-2"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
@@ -734,6 +746,7 @@ func TestGithubHandlerWorkflowRunIgnoredConclusion(t *testing.T) {
 }
 
 func TestGithubHandlerWorkflowRunInvalidJSON(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("bad")))
 	req.Header.Set("X-GitHub-Event", "workflow_run")
@@ -762,6 +775,7 @@ func TestGithubHandlerWorkflowRunNoPullRequests(t *testing.T) {
 }
 
 func TestGithubHandlerIssueCommentInvalidJSON(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader([]byte("bad")))
 	req.Header.Set("X-GitHub-Event", "issue_comment")
@@ -772,6 +786,7 @@ func TestGithubHandlerIssueCommentInvalidJSON(t *testing.T) {
 }
 
 func TestGithubHandlerIssueCommentNonPR(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"created","issue":{"number":1},"comment":{"body":"/velocity do"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
@@ -783,6 +798,7 @@ func TestGithubHandlerIssueCommentNonPR(t *testing.T) {
 }
 
 func TestGithubHandlerIssueCommentNoPrefix(t *testing.T) {
+	startCapturingQueue(t)
 	rec := httptest.NewRecorder()
 	body := []byte(`{"action":"created","issue":{"number":1,"pull_request":{}},"comment":{"body":"just chatting"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))

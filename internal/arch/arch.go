@@ -82,7 +82,10 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	}
 
 	*stage = "retry-guard"
-	existing, _ := db.GetPlan(ctx, parentKey)
+	existing, err := db.GetPlan(ctx, parentKey)
+	if err != nil {
+		return fmt.Errorf("retry guard: %w", err)
+	}
 	if existing != nil {
 		switch existing.Status {
 		case data.PlanDone:
@@ -105,7 +108,9 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 
 	*stage = "transition-planning"
 	if planning := status.TaskJiraName(status.Planning); planning != "" {
-		client.Transition(parentKey, planning)
+		if !client.Transition(parentKey, planning) {
+			slog.Error("arch: transition to planning failed", "key", parentKey, "target", planning)
+		}
 	}
 
 	*stage = "clone"
@@ -195,7 +200,9 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 
 	*stage = "transition-coding"
 	if coding := status.TaskJiraName(status.Coding); coding != "" {
-		client.Transition(parentKey, coding)
+		if !client.Transition(parentKey, coding) {
+			slog.Error("arch: transition to coding failed", "key", parentKey, "target", coding)
+		}
 	}
 
 	*stage = "enqueue-assign-wave-0"

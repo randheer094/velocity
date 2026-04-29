@@ -16,8 +16,8 @@ func NewRootCmd() *cobra.Command {
 		Short:         "Webhook-driven Jira → PR agent (arch + code)",
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			config.SetDir(dir)
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return config.SetDir(dir)
 		},
 	}
 	root.PersistentFlags().StringVar(&dir, "dir", defaultDir, "velocity data directory")

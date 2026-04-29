@@ -18,6 +18,12 @@ import (
 
 const requestTimeout = 30 * time.Second
 
+// maxResponseBytes caps how much of a GitHub response body the client
+// will buffer. PR / Issue / Workflow API replies sit well below this;
+// the cap prevents a misbehaving proxy or compromised endpoint from
+// exhausting memory with an unbounded stream.
+const maxResponseBytes = 16 << 20
+
 // apiBase is overridden by tests via the test helper in client_test.go.
 var apiBase = "https://api.github.com"
 
@@ -83,7 +89,7 @@ func (c *Client) do(method, path string, body any) (*http.Response, []byte, erro
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	return resp, respBody, nil
 }
 

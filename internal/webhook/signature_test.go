@@ -21,6 +21,7 @@ func sign(secret string, body []byte) string {
 func TestJiraHandlerBadSignature(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
+	startCapturingQueue(t)
 	t.Setenv(config.JiraWebhookSecretEnv, "shh")
 
 	rec := httptest.NewRecorder()
@@ -35,6 +36,7 @@ func TestJiraHandlerBadSignature(t *testing.T) {
 func TestJiraHandlerGoodSignature(t *testing.T) {
 	setupConfig(t)
 	defer teardownConfig(t)
+	startCapturingQueue(t)
 	t.Setenv(config.JiraWebhookSecretEnv, "shh")
 
 	body := []byte(`{"issue":{"key":"X-1","fields":{}}}`)
@@ -48,6 +50,7 @@ func TestJiraHandlerGoodSignature(t *testing.T) {
 }
 
 func TestGithubHandlerBadSignature(t *testing.T) {
+	startCapturingQueue(t)
 	t.Setenv(config.GithubWebhookSecretEnv, "shh")
 
 	rec := httptest.NewRecorder()
@@ -80,7 +83,12 @@ func TestVerifyHMACSHA256(t *testing.T) {
 	if verifyHMACSHA256(secret, "sha256=zzz", body) {
 		t.Errorf("non-hex should fail")
 	}
+	t.Setenv(InsecureWebhooksEnv, "")
+	if verifyHMACSHA256("", "anything", body) {
+		t.Errorf("empty secret should reject by default (production safety)")
+	}
+	t.Setenv(InsecureWebhooksEnv, "1")
 	if !verifyHMACSHA256("", "anything", body) {
-		t.Errorf("empty secret should accept")
+		t.Errorf("empty secret should accept when VELOCITY_INSECURE_WEBHOOKS=1")
 	}
 }

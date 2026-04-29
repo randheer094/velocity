@@ -173,17 +173,25 @@ func reportIterateFailure(branch, prURL string, reason IterateReason, stage stri
 
 // parsePRURL pulls "owner/repo" + PR number out of a standard
 // https://github.com/<owner>/<repo>/pull/<num> URL. Returns zeros on
-// any shape we don't recognise.
+// any shape we don't recognise — including missing scheme, empty
+// owner / repo segments, non-positive PR numbers, and trailing
+// garbage past the number.
 func parsePRURL(prURL string) (string, int) {
 	u := strings.TrimSpace(prURL)
-	u = strings.TrimPrefix(u, "https://github.com/")
-	u = strings.TrimPrefix(u, "http://github.com/")
+	switch {
+	case strings.HasPrefix(u, "https://github.com/"):
+		u = strings.TrimPrefix(u, "https://github.com/")
+	case strings.HasPrefix(u, "http://github.com/"):
+		u = strings.TrimPrefix(u, "http://github.com/")
+	default:
+		return "", 0
+	}
 	parts := strings.Split(u, "/")
-	if len(parts) < 4 || parts[2] != "pull" {
+	if len(parts) < 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" {
 		return "", 0
 	}
 	num, err := strconv.Atoi(parts[3])
-	if err != nil {
+	if err != nil || num <= 0 {
 		return "", 0
 	}
 	return parts[0] + "/" + parts[1], num
