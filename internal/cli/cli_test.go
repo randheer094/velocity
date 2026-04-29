@@ -62,9 +62,39 @@ func writeValidConfig(t *testing.T) {
 				Done:         config.StatusBucket{Default: "Done", Aliases: []string{"Dismissed"}},
 			},
 		},
+		Resources: config.ResourcesConfig{
+			RepoSlug: "owner/velocity-resources",
+			Version:  "v0.0.0",
+		},
 	}
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
+	}
+	seedFixtureResourcesAt(t, config.ResourcesDir())
+}
+
+// seedFixtureResourcesAt writes a minimal manifest + templates so the
+// daemon-start path's prompts.Load succeeds.
+func seedFixtureResourcesAt(t *testing.T, resDir string) {
+	t.Helper()
+	files := map[string]string{
+		"prompts/manifest.yaml": `version: 0
+prompts:
+  - id: arch_plan
+    path: arch/plan.md
+    placeholders: [PlanBegin, PlanEnd, ParentKey, Requirement]
+`,
+		"prompts/arch/plan.md": "{{.PlanBegin}} {{.ParentKey}} {{.Requirement}} {{.PlanEnd}}",
+		"VERSION":              "v0.0.0",
+	}
+	for rel, body := range files {
+		full := filepath.Join(resDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -53,10 +53,10 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: arm64
-        run: go build -o /tmp/velocity-arm64 ./cmd/velocity
+        run: go build -ldflags="-s -w" -o /tmp/velocity-arm64 ./cmd/velocity
 
       - name: cross-compile darwin/amd64
         env:
           GOOS: darwin
           GOARCH: amd64
-        run: go build -o /tmp/velocity-amd64 ./cmd/velocity
+        run: go build -ldflags="-s -w" -o /tmp/velocity-amd64 ./cmd/velocity

@@ -57,3 +57,12 @@ server:
   port: 8000
   max_concurrency: 1   # llm-queue workers (arch.Run / code.Run / code.Iterate); ops queue is always 1 worker
   queue_size: 1024     # soft cap on pending rows per queue
+
+# resources pins the velocity-resources release tarball that populates
+# ~/.velocity/resources. Set by `velocity setup`; refreshed by
+# `velocity update-prompts`. Edit by hand only if you know what you're
+# doing — the binary's prompt schema is pinned to a single major.
+resources:
+  repo_slug: ""        # <owner>/<repo>, e.g. randheer094/velocity-resources
+  version: ""          # release tag extracted to disk, e.g. v0.6.0
+  fetch_timeout_sec: 30

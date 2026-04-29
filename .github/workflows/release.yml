@@ -8,8 +8,26 @@ permissions:
   contents: write
 
 jobs:
+  check-major:
+    name: Verify release tag matches version.Major
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Compare tag major to version.Major
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: ./scripts/check-major.sh "$RELEASE_TAG"
+
   build:
     name: Build ${{ matrix.asset }}
+    needs: check-major
     strategy:
       fail-fast: false
       matrix:

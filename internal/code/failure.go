@@ -2,6 +2,7 @@ package code
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
@@ -9,8 +10,39 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/jira"
+	"github.com/randheer094/velocity/internal/prompts"
 	"github.com/randheer094/velocity/internal/status"
 )
+
+// renderFailureComment falls back to a hardcoded one-liner when the
+// template is unavailable so a template bug never silently swallows a
+// real failure record.
+func renderFailureComment(role, stage, msg string) string {
+	out, err := prompts.Render("failure_jira", failureData{Role: role, Stage: stage, Message: msg})
+	if err != nil {
+		slog.Warn("code: render failure_jira fallback", "err", err)
+		return fmt.Sprintf("Velocity %s failed at stage %s: %s", role, stage, msg)
+	}
+	return out
+}
+
+func renderIterateJiraComment(reason, stage, msg string) string {
+	out, err := prompts.Render("failure_iterate_jira", iterateJiraData{Reason: reason, Stage: stage, Message: msg})
+	if err != nil {
+		slog.Warn("code: render failure_iterate_jira fallback", "err", err)
+		return fmt.Sprintf("Velocity iterate (%s) failed at stage %s: %s", reason, stage, msg)
+	}
+	return out
+}
+
+func renderIteratePRComment(stage, msg string) string {
+	out, err := prompts.Render("failure_iterate_pr", iteratePRData{Stage: stage, Message: msg})
+	if err != nil {
+		slog.Warn("code: render failure_iterate_pr fallback", "err", err)
+		return fmt.Sprintf("Velocity iterate failed at stage %s: %s", stage, msg)
+	}
+	return out
+}
 
 // Best-effort scrub — the unredacted error stays in daemon.log.
 var secretPatterns = []*regexp.Regexp{
@@ -38,7 +70,7 @@ func recordFailure(ctx context.Context, issueKey, parentKey, repoURL, title, sta
 	slog.Error("code: stage failed", "key", issueKey, "stage", stage, "err", err)
 	failedName := status.SubtaskJiraName(status.CodingFailed)
 	if client := jira.Shared(); client != nil {
-		_ = client.CommentIssue(issueKey, formatFailureComment("code", stage, msg))
+		_ = client.CommentIssue(issueKey, renderFailureComment("code", stage, msg))
 		if failedName != "" {
 			_ = client.Transition(issueKey, failedName)
 		}

@@ -24,6 +24,8 @@ func NewRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		newConfigCmd(),
+		newSetupCmd(),
+		newUpdatePromptsCmd(),
 		newStartCmd(),
 		newStopCmd(),
 		newRestartCmd(),
@@ -31,6 +33,7 @@ func NewRootCmd() *cobra.Command {
 		newLogsCmd(),
 		newCheckCmd(),
 		newPrepareCmd(),
+		newVersionCmd(),
 	)
 	return root
 }

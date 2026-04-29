@@ -3,6 +3,9 @@
 BINARY := velocity
 INSTALL_DIR ?= $(HOME)/.local/bin
 
+# Version comes from internal/version/VERSION via //go:embed; no
+# -ldflags wiring needed. The -s -w pair below strips the debug
+# symbol table for size — unrelated to versioning.
 build:
 	go build -ldflags="-s -w" -o $(BINARY) ./cmd/velocity
 

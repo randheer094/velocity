@@ -17,6 +17,7 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/jira"
+	"github.com/randheer094/velocity/internal/prompts"
 	"github.com/randheer094/velocity/internal/webhook"
 )
 
@@ -73,13 +74,25 @@ func Run() error {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case sig := <-stop:
-		slog.Info("velocity shutdown signal", "sig", sig.String())
-	case err := <-errCh:
-		if err != nil {
-			return err
+	reload := make(chan os.Signal, 1)
+	signal.Notify(reload, syscall.SIGHUP)
+	// Loop on signal events: SIGHUP triggers an in-place prompts
+	// reload and `continue`s the loop; SIGINT/SIGTERM and a server
+	// error fall through to `break` so the shutdown sequence runs.
+	for {
+		select {
+		case sig := <-stop:
+			slog.Info("velocity shutdown signal", "sig", sig.String())
+		case <-reload:
+			slog.Info("velocity SIGHUP: reloading prompts")
+			_ = prompts.Reload(config.ResourcesDir())
+			continue
+		case err := <-errCh:
+			if err != nil {
+				return err
+			}
 		}
+		break
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

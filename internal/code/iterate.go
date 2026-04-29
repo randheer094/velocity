@@ -117,8 +117,13 @@ func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint stri
 		return fmt.Errorf("checkout %s: %w", branch, err)
 	}
 
+	*stage = "render-prompt"
+	prompt, err := buildIteratePrompt(branch, title, description, baseBranch, extra)
+	if err != nil {
+		return fmt.Errorf("render iterate prompt: %w", err)
+	}
+
 	*stage = "code-llm"
-	prompt := buildIteratePrompt(branch, title, description, baseBranch, extra)
 	opts := llm.OptionsFromRoleConfig(cfg.LLM.Code, workspace)
 	if _, err := llm.RunPrompt(ctx, prompt, opts); err != nil {
 		return fmt.Errorf("code llm: %w", err)
@@ -155,13 +160,13 @@ func reportIterateFailure(branch, prURL string, reason IterateReason, stage stri
 	// Jira comment only makes sense when the branch is a Jira issue key.
 	if data.ValidJiraKey(branch) {
 		if client := jira.Shared(); client != nil {
-			_ = client.CommentIssue(branch, formatIterateJiraComment(string(reason), stage, msg))
+			_ = client.CommentIssue(branch, renderIterateJiraComment(string(reason), stage, msg))
 		}
 	}
 
 	if prURL != "" {
 		if repo, num := parsePRURL(prURL); repo != "" && num > 0 {
-			github.New().AddPRComment(repo, num, formatIteratePRComment(stage, msg))
+			github.New().AddPRComment(repo, num, renderIteratePRComment(stage, msg))
 		}
 	}
 }

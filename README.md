@@ -204,7 +204,10 @@ directory (default `~/.velocity`).
 
 | Command | Description |
 |---|---|
+| `velocity version` | Print the binary version (e.g. `velocity v0.6.0 (manifest major 0)`). |
 | `velocity config` | Print the current `config.yaml` to stdout. |
+| `velocity setup` | Download the velocity-resources release tarball into `~/.velocity/resources/` and pin the repo + version in `config.yaml`. Required once before `start`. |
+| `velocity update-prompts [tag]` | Refresh `~/.velocity/resources/` from the configured repo. Without a tag, picks the newest release whose major matches this binary. Sends SIGHUP to a running daemon for live reload. |
 | `velocity start` | Detach and run the webhook server. |
 | `velocity start --foreground` | Run in the current terminal (debug). |
 | `velocity stop` | SIGTERM the daemon; SIGKILL after 10 s. |
@@ -213,7 +216,7 @@ directory (default `~/.velocity`).
 | `velocity logs` | Print `~/.velocity/daemon.log`. |
 | `velocity logs -f` | Tail the log. |
 | `velocity check <path>` | Report whether a project has the files velocity expects. |
-| `velocity prepare <path>` | Install `CLAUDE.md` and the `prepare-for-pr` skill (Go / Android), pulled from [velocity-resources](https://github.com/randheer094/velocity-resources). |
+| `velocity prepare <path>` | Install `CLAUDE.md` and the `prepare-for-pr` skill (Go / Android) from the local resources cache. Run `velocity setup` first to populate the cache. |
 | `velocity prepare <path> --force` | Overwrite existing files when preparing. |
 | `velocity --dir <path>` | Target an alternate data directory. |
 
@@ -265,12 +268,11 @@ Hint: run `velocity prepare /abs/path/my-repo` to install the missing pieces.
 
 ### `velocity prepare PROJECTPATH`
 
-Detects the project type, downloads the matching `<type>/` subtree
-from [velocity-resources](https://github.com/randheer094/velocity-resources),
-and writes it under `.claude/` at the project root. The resources
-repo is the source of truth for what gets installed — `velocity`
-does not bundle its own copies. To pin a non-default ref (branch or
-tag), set `VELOCITY_RESOURCES_REF` (default `main`).
+Detects the project type, reads the matching `<type>/` subtree from
+the local resources cache at `~/.velocity/resources/`, and writes it
+under `.claude/` at the project root. The cache is populated by
+`velocity setup` (and refreshed by `velocity update-prompts`); if it
+is missing, `prepare` exits with `resources not installed; run \`velocity setup\` first`.
 
 The installed layout follows the resources repo: a `CLAUDE.md`
 index, a set of topic files under `.claude/rules/`, and the
@@ -284,6 +286,70 @@ them.
 Pass `--force` to overwrite them. Projects that match neither Go nor
 Android are rejected — author those files by hand, or open an issue
 on velocity-resources to request a new project type.
+
+### `velocity setup` and `velocity update-prompts`
+
+LLM prompts (arch / code / iterate) and Jira/PR failure-comment
+templates live in
+[velocity-resources](https://github.com/randheer094/velocity-resources)
+release tarballs, not in the velocity binary. Before `velocity start`
+will run, install a release with `velocity setup`:
+
+```
+$ velocity setup
+Resources repo (<owner>/<repo>): randheer094/velocity-resources
+Version (release tag, e.g. v0.6.0): v0.6.0
+Downloading velocity-resources v0.6.0 from randheer094/velocity-resources
+Installed resources at /home/you/.velocity/resources
+Pinned randheer094/velocity-resources@v0.6.0 in /home/you/.velocity/config.yaml
+```
+
+`setup` downloads `velocity-resources-<tag>.tar.gz` and `SHA256SUMS`
+from the release page, verifies the tarball checksum, extracts to
+`~/.velocity/resources/`, and persists the repo slug + tag under
+`resources:` in `config.yaml`. The major version of the tag must
+match the velocity binary's major (`velocity version` prints it);
+major mismatches (e.g. installing `v1.x` into a binary that supports
+`v0.x`) are rejected with `major mismatch: binary expects 0, requested 1`.
+The release-binary CI also gates on this — a `vX.Y.Z` release tag
+that disagrees with `internal/version/VERSION` or with the
+`const Major` declared in `internal/version/version.go` fails the
+release build.
+
+Cutting a release: bump `internal/version/VERSION` (and
+`const Major` in `internal/version/version.go` if the major changed)
+in the same commit you tag. The binary's version comes from that
+file via `//go:embed`, so any build path — `make build`, plain
+`go build ./cmd/velocity`, `go install`, the release CI — reports
+the same value.
+
+To upgrade or pin a different tag once the cache exists, use
+`velocity update-prompts`. Without an argument it queries the
+configured repo's releases API and picks the newest tag whose major
+matches the binary; with an explicit tag (`velocity update-prompts v0.6.1`)
+it uses that tag and rejects major mismatches the same way `setup`
+does. After a successful update, if the daemon is running, the
+command sends SIGHUP and the daemon swaps in the new templates with
+no restart. If the daemon is not running, `update-prompts` prints
+`daemon not running, restart to pick up changes` and exits 0.
+
+The cache layout after a successful `setup` / `update-prompts`:
+
+```
+~/.velocity/
+  resources/
+    VERSION                    # e.g. "v0.6.0"
+    SHA256SUMS                 # the verified copy
+    go/.claude/...             # consumed by `velocity prepare`
+    android/.claude/...
+    prompts/manifest.yaml      # consumed by the daemon
+    prompts/arch/plan.md
+    prompts/code/run.md
+    prompts/code/iterate.md
+    prompts/failure/jira.md
+    prompts/failure/iterate_jira.md
+    prompts/failure/iterate_pr.md
+```
 
 ## Configuration reference
 
@@ -326,6 +392,11 @@ llm:
     allowed_tools: Read Write Edit Glob Grep LS MultiEdit Bash
     permission_mode: bypassPermissions
     timeout_sec: 1800
+
+resources:
+  repo_slug: ""              # <owner>/<repo> of velocity-resources, written by `velocity setup`
+  version: ""                # release tag currently extracted to ~/.velocity/resources, written by `velocity setup`
+  fetch_timeout_sec: 30      # per-HTTP-call timeout for setup / update-prompts
 ```
 
 ### Status buckets

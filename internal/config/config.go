@@ -233,17 +233,47 @@ type ServerConfig struct {
 	QueueSize      int    `yaml:"queue_size"`
 }
 
+// ResourcesConfig pins the velocity-resources release tarball that
+// populates ~/.velocity/resources. Setup is what writes RepoSlug; there
+// is no hardcoded default — every velocity install picks its own
+// resources repo (upstream, fork, or internal mirror).
+type ResourcesConfig struct {
+	// RepoSlug is the bare <owner>/<repo> GitHub slug, e.g.
+	// "randheer094/velocity-resources". Never a full URL.
+	RepoSlug string `yaml:"repo_slug,omitempty"`
+	// Version is the release tag currently extracted to disk
+	// (e.g. "v0.6.0"). setup and update-prompts maintain this.
+	Version string `yaml:"version,omitempty"`
+	// FetchTimeoutSec caps each HTTP call. Default 30.
+	FetchTimeoutSec int `yaml:"fetch_timeout_sec,omitempty"`
+}
+
+func (r ResourcesConfig) Validate() error {
+	if r.RepoSlug == "" {
+		return nil
+	}
+	parts := strings.Split(r.RepoSlug, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("resources.repo_slug must be <owner>/<repo>, got %q", r.RepoSlug)
+	}
+	return nil
+}
+
 // Config is the validated on-disk config.yaml shape. Secrets and all
 // Postgres connection fields are sourced from env vars (see secrets.go),
 // not written to disk.
 type Config struct {
-	Jira   JiraConfig   `yaml:"jira"`
-	LLM    LLMConfig    `yaml:"llm"`
-	Server ServerConfig `yaml:"server"`
+	Jira      JiraConfig      `yaml:"jira"`
+	LLM       LLMConfig       `yaml:"llm"`
+	Server    ServerConfig    `yaml:"server"`
+	Resources ResourcesConfig `yaml:"resources"`
 }
 
 func (c Config) Validate() error {
-	return c.Jira.Validate()
+	if err := c.Jira.Validate(); err != nil {
+		return err
+	}
+	return c.Resources.Validate()
 }
 
 func (c *Config) applyDefaults() {
@@ -288,6 +318,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.QueueSize < 1 {
 		c.Server.QueueSize = 1024
+	}
+	if c.Resources.FetchTimeoutSec == 0 {
+		c.Resources.FetchTimeoutSec = 30
 	}
 	c.Jira.BaseURL = strings.TrimRight(c.Jira.BaseURL, "/")
 }

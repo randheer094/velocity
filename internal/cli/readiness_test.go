@@ -1,15 +1,13 @@
 package cli
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/randheer094/velocity/internal/config"
 )
 
 // goFiles is the canonical fake-resources layout for a Go project.
@@ -28,48 +26,24 @@ var androidFiles = map[string]string{
 	"android/.claude/skills/prepare-for-pr/SKILL.md": "---\nname: prepare-for-pr\n---\n",
 }
 
-// startResourcesServer stands up an httptest server that returns a
-// tarball mirroring the velocity-resources layout, and rewires
-// resourcesURL to point at it for the duration of the test.
-func startResourcesServer(t *testing.T, files map[string]string) {
+// seedResourcesCache populates the agent dir with a fake resources
+// cache containing the given files. Returns the resources dir path.
+func seedResourcesCache(t *testing.T, files map[string]string) string {
 	t.Helper()
-	body := buildResourcesTarball(t, "velocity-resources-main", files)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/x-gzip")
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(srv.Close)
-	saved := resourcesURL
-	resourcesURL = func(ref string) string { return srv.URL + "/" + ref }
-	t.Cleanup(func() { resourcesURL = saved })
-}
-
-func buildResourcesTarball(t *testing.T, topDir string, files map[string]string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for path, body := range files {
-		hdr := &tar.Header{
-			Name:     topDir + "/" + path,
-			Mode:     0o644,
-			Size:     int64(len(body)),
-			Typeflag: tar.TypeReg,
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
+	dir := t.TempDir()
+	config.SetDir(dir)
+	t.Cleanup(func() { config.SetDir(t.TempDir()) })
+	resDir := config.ResourcesDir()
+	for rel, body := range files {
+		full := filepath.Join(resDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write([]byte(body)); err != nil {
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
+	return resDir
 }
 
 func TestDetectProjectType(t *testing.T) {
@@ -139,8 +113,6 @@ func TestInspectReadinessAllMissing(t *testing.T) {
 	}
 }
 
-// check only verifies presence; a directory at CLAUDE.md's path still
-// fails because the expected artifact is a file.
 func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, claudeMdPath), 0o755); err != nil {
@@ -152,8 +124,6 @@ func TestInspectReadinessCLAUDEIsDir(t *testing.T) {
 	}
 }
 
-// Presence-only semantics: empty CLAUDE.md / SKILL.md are OK. Content
-// is the project's problem, not velocity's.
 func TestInspectReadinessEmptyFilesAreOK(t *testing.T) {
 	dir := t.TempDir()
 	claudeMd := filepath.Join(dir, claudeMdPath)
@@ -326,7 +296,7 @@ func TestNewCheckCmdPathIsFile(t *testing.T) {
 }
 
 func TestNewPrepareCmdGoInstalls(t *testing.T) {
-	startResourcesServer(t, goFiles)
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -355,13 +325,13 @@ func TestNewPrepareCmdGoInstalls(t *testing.T) {
 	if !strings.Contains(out.String(), "Detected go project") {
 		t.Errorf("expected 'Detected go project' in output, got:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "Fetching templates from "+resourcesRepo) {
-		t.Errorf("expected fetch line in output, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "Reading templates from") {
+		t.Errorf("expected reading-templates line, got:\n%s", out.String())
 	}
 }
 
 func TestNewPrepareCmdAndroidInstalls(t *testing.T) {
-	startResourcesServer(t, androidFiles)
+	seedResourcesCache(t, androidFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "build.gradle.kts"), nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -393,7 +363,7 @@ func TestNewPrepareCmdUnknownProjectErrors(t *testing.T) {
 }
 
 func TestNewPrepareCmdSkipsExistingWithoutForce(t *testing.T) {
-	startResourcesServer(t, goFiles)
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -425,7 +395,7 @@ func TestNewPrepareCmdSkipsExistingWithoutForce(t *testing.T) {
 }
 
 func TestNewPrepareCmdForceOverwrites(t *testing.T) {
-	startResourcesServer(t, goFiles)
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -459,6 +429,7 @@ func TestNewPrepareCmdForceOverwrites(t *testing.T) {
 }
 
 func TestNewPrepareCmdMissingPath(t *testing.T) {
+	seedResourcesCache(t, goFiles)
 	cmd := newPrepareCmd()
 	err := cmd.RunE(cmd, []string{filepath.Join(t.TempDir(), "does-not-exist")})
 	if err == nil {
@@ -469,7 +440,7 @@ func TestNewPrepareCmdMissingPath(t *testing.T) {
 // MkdirAll inside installTemplates returns ENOTDIR when a regular
 // file blocks the destination path, and that bubbles out as an error.
 func TestNewPrepareCmdMkdirAllFails(t *testing.T) {
-	startResourcesServer(t, goFiles)
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -489,7 +460,7 @@ func TestNewPrepareCmdMkdirAllFails(t *testing.T) {
 // WriteFile directly — which fails when the target path is itself a
 // directory.
 func TestNewPrepareCmdWriteFileFails(t *testing.T) {
-	startResourcesServer(t, goFiles)
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -509,14 +480,11 @@ func TestNewPrepareCmdWriteFileFails(t *testing.T) {
 	}
 }
 
-func TestNewPrepareCmdFetchHTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	t.Cleanup(srv.Close)
-	saved := resourcesURL
-	resourcesURL = func(ref string) string { return srv.URL + "/" + ref }
-	t.Cleanup(func() { resourcesURL = saved })
+func TestNewPrepareCmdMissingCache(t *testing.T) {
+	// Point config at an empty agent dir — no resources cache.
+	emptyDir := t.TempDir()
+	config.SetDir(emptyDir)
+	t.Cleanup(func() { config.SetDir(t.TempDir()) })
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
@@ -526,34 +494,25 @@ func TestNewPrepareCmdFetchHTTPError(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err := cmd.RunE(cmd, []string{dir})
-	if err == nil || !strings.Contains(err.Error(), "status 500") {
-		t.Fatalf("expected status 500 error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "resources not installed") {
+		t.Fatalf("expected setup hint, got %v", err)
 	}
 }
 
-func TestNewPrepareCmdFetchEmptyTarball(t *testing.T) {
-	startResourcesServer(t, map[string]string{"unrelated/file.md": "x\n"})
+func TestNewPrepareCmdWrongProjectType(t *testing.T) {
+	// Cache only has Go files; an Android project errors with "Resources
+	// not installed" because android/ doesn't exist.
+	seedResourcesCache(t, goFiles)
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "build.gradle.kts"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmd := newPrepareCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err := cmd.RunE(cmd, []string{dir})
-	if err == nil || !strings.Contains(err.Error(), "no resources") {
-		t.Fatalf("expected no-resources error, got %v", err)
-	}
-}
-
-func TestResourcesRefUsesEnvOverride(t *testing.T) {
-	t.Setenv(resourcesRefEnv, "")
-	if got := resourcesRef(); got != defaultResourcesRef {
-		t.Errorf("default ref = %q, want %q", got, defaultResourcesRef)
-	}
-	t.Setenv(resourcesRefEnv, "feature/x")
-	if got := resourcesRef(); got != "feature/x" {
-		t.Errorf("override ref = %q, want feature/x", got)
+	if err == nil || !strings.Contains(err.Error(), "resources not installed") {
+		t.Fatalf("expected missing-cache error, got %v", err)
 	}
 }
 
@@ -569,7 +528,7 @@ func TestRootCmdIncludesReadinessSubcommands(t *testing.T) {
 	for _, c := range root.Commands() {
 		names[c.Name()] = true
 	}
-	for _, want := range []string{"check", "prepare"} {
+	for _, want := range []string{"check", "prepare", "setup", "update-prompts"} {
 		if !names[want] {
 			t.Errorf("missing subcommand: %s", want)
 		}

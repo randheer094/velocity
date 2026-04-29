@@ -16,8 +16,12 @@ func removeWorkspaceForKey(key string) error {
 }
 
 func TestBuildIteratePromptContainsExtra(t *testing.T) {
-	got := buildIteratePrompt("PROJ-1", "title", "desc", "main", "fix the flaky CI")
-	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI", `"main"`, "rebase", ".claude/skills/prepare-for-pr/SKILL.md"} {
+	loadFixturePrompts(t)
+	got, err := buildIteratePrompt("PROJ-1", "title", "desc", "main", "fix the flaky CI")
+	if err != nil {
+		t.Fatalf("buildIteratePrompt: %v", err)
+	}
+	for _, want := range []string{"PROJ-1", "title", "desc", "fix the flaky CI", "main"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q: %s", want, got)
 		}
@@ -29,12 +33,12 @@ func TestParsePRURL(t *testing.T) {
 		repo string
 		num  int
 	}{
-		"https://github.com/o/r/pull/42": {"o/r", 42},
-		"http://github.com/o/r/pull/1":   {"o/r", 1},
-		"https://github.com/o/r":         {"", 0},
+		"https://github.com/o/r/pull/42":  {"o/r", 42},
+		"http://github.com/o/r/pull/1":    {"o/r", 1},
+		"https://github.com/o/r":          {"", 0},
 		"https://github.com/o/r/issues/1": {"", 0},
-		"not-a-url":                      {"", 0},
-		"https://github.com/o/r/pull/x":  {"", 0},
+		"not-a-url":                       {"", 0},
+		"https://github.com/o/r/pull/x":   {"", 0},
 	}
 	for in, want := range cases {
 		r, n := parsePRURL(in)

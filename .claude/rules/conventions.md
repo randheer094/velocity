@@ -17,13 +17,22 @@ schema, code PR body, branch naming) live beside the agent code.
 - IDs are Jira issue keys. Plans key on parent key; `code_tasks`
   rows key on sub-task key; workspaces named `workspace/<KEY>/`.
   Git branches **must** equal the sub-task key exactly.
+- Binary version comes from `internal/version/VERSION` via
+  `//go:embed`. Bump that file (and `const Major` in `version.go`
+  when the major changes) in the same commit you tag.
 
 ## Scope (do not re-introduce)
 
 - Schedulers, tickers, polling loops, filesystem queues.
 - Manual task-create endpoints, a web UI, or any HTTP setup surface.
 - Per-agent binaries, subprocess workers, `cmd/<other>/` binaries.
-- New shared `internal/` packages beyond the existing set.
+  (Exception: `cmd/print-version-major` exists only so the release
+  CI gate can read `version.Major` without grepping source.)
+- New shared `internal/` packages beyond the existing set —
+  `arch`, `cli`, `code`, `config`, `data`, `db`, `git`, `github`,
+  `jira`, `llm`, `pidfile`, `prompts`, `resources`, `server`,
+  `status`, `version`, `webhook`. New shared concerns extend an
+  existing package.
 - Per-agent config files or on-disk secret stores.
 
 New features belong in `internal/arch/`, `internal/code/`, or an

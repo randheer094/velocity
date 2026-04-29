@@ -18,7 +18,23 @@ import (
 	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/github"
 	"github.com/randheer094/velocity/internal/jira"
+	"github.com/randheer094/velocity/internal/prompts"
 )
+
+// loadFixturePrompts installs an in-memory prompt set sufficient for
+// the code package's tests. Each test that hits buildCodePrompt /
+// buildIteratePrompt should call this so render errors don't masquerade
+// as real failures.
+func loadFixturePrompts(t *testing.T) {
+	t.Helper()
+	prompts.SetForTest(t, map[string]string{
+		"code_run":             "subtask={{.IssueKey}} title={{.Title}} desc={{.Description}}",
+		"code_iterate":         "iter={{.IssueKey}} title={{.Title}} desc={{.Description}} base={{.BaseBranch}} extra={{.Extra}}",
+		"failure_jira":         "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
+		"failure_iterate_jira": "Velocity iterate ({{.Reason}}) failed at stage {{.Stage}}: {{.Message}}",
+		"failure_iterate_pr":   "Velocity iterate failed at stage {{.Stage}}: {{.Message}}",
+	})
+}
 
 func osExec(name string, args ...string) *exec.Cmd { return exec.Command(name, args...) }
 
@@ -185,6 +201,10 @@ echo "ok"
 	config.SetDir(dir)
 	jira.Reinit()
 
+	if err := seedFixturePromptsForMain(dir); err != nil {
+		panic(err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := db.Start(ctx); err != nil {
@@ -209,6 +229,46 @@ func requireDB(t *testing.T) {
 	if !dbReady {
 		t.Skip("db not available")
 	}
+}
+
+func seedFixturePromptsForMain(dir string) error {
+	resDir := filepath.Join(dir, "resources")
+	files := map[string]string{
+		"prompts/manifest.yaml": `version: 0
+prompts:
+  - id: code_run
+    path: code/run.md
+    placeholders: [IssueKey, Title, Description]
+  - id: code_iterate
+    path: code/iterate.md
+    placeholders: [IssueKey, Title, Description, BaseBranch, Extra]
+  - id: failure_jira
+    path: failure/jira.md
+    placeholders: [Role, Stage, Message]
+  - id: failure_iterate_jira
+    path: failure/iterate_jira.md
+    placeholders: [Reason, Stage, Message]
+  - id: failure_iterate_pr
+    path: failure/iterate_pr.md
+    placeholders: [Stage, Message]
+`,
+		"prompts/code/run.md":             "subtask={{.IssueKey}} title={{.Title}} desc={{.Description}}",
+		"prompts/code/iterate.md":         "iter={{.IssueKey}} title={{.Title}} desc={{.Description}} base={{.BaseBranch}} extra={{.Extra}}",
+		"prompts/failure/jira.md":         "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
+		"prompts/failure/iterate_jira.md": "Velocity iterate ({{.Reason}}) failed at stage {{.Stage}}: {{.Message}}",
+		"prompts/failure/iterate_pr.md":   "Velocity iterate failed at stage {{.Stage}}: {{.Message}}",
+		"VERSION":                         "v0.0.0",
+	}
+	for rel, body := range files {
+		full := filepath.Join(resDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	return prompts.Load(resDir)
 }
 
 // cleanCodeTask removes any residual code_tasks row for issueKey so

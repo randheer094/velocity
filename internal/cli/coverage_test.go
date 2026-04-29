@@ -150,18 +150,25 @@ func TestNewLogsCmdPermissionError(t *testing.T) {
 	}
 }
 
-// TestNewRestartCmdStopFails covers the stop()-returns-error branch.
-func TestNewRestartCmdStopFails(t *testing.T) {
+// TestNewRestartCmdSkipsStalePidfile verifies restart treats a
+// pidfile pointing at a dead pid as "not running" rather than erroring
+// out — pidfile.VerifyAlive filters the stale entry, the file is
+// removed, and detach() proceeds to spawn a fresh daemon.
+func TestNewRestartCmdSkipsStalePidfile(t *testing.T) {
 	dir := t.TempDir()
 	config.SetDir(dir)
 	writeValidConfig(t)
-	// Stale pid that almost certainly doesn't exist → SIGTERM returns ESRCH.
+	// Stale pid that almost certainly doesn't exist.
 	if err := writePid(2147483646); err != nil {
 		t.Fatal(err)
 	}
 	cmd := newRestartCmd()
-	if err := cmd.RunE(cmd, nil); err == nil {
-		t.Error("expected stop error from restart")
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Errorf("restart with stale pidfile should succeed, got %v", err)
+	}
+	// detach() wrote a fresh pidfile.
+	if pid, _ := readPid(); pid <= 0 || pid == 2147483646 {
+		t.Errorf("expected fresh pidfile, got %d", pid)
 	}
 }
 

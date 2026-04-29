@@ -22,8 +22,8 @@ func TestRedactAndTruncate(t *testing.T) {
 	}
 }
 
-func TestFormatFailureComment(t *testing.T) {
-	got := formatFailureComment("code", "stage1", "boom")
+func TestRenderFailureCommentFallback(t *testing.T) {
+	got := renderFailureComment("code", "stage1", "boom")
 	if !strings.Contains(got, "code") || !strings.Contains(got, "stage1") || !strings.Contains(got, "boom") {
 		t.Errorf("comment = %q", got)
 	}
@@ -68,13 +68,12 @@ func TestCancelHelpers(t *testing.T) {
 }
 
 func TestBuildCodePrompt(t *testing.T) {
-	got := buildCodePrompt("PROJ-1", "title", "desc")
-	for _, want := range []string{
-		"PROJ-1",
-		"title",
-		"desc",
-		".claude/skills/prepare-for-pr/SKILL.md",
-	} {
+	loadFixturePrompts(t)
+	got, err := buildCodePrompt("PROJ-1", "title", "desc")
+	if err != nil {
+		t.Fatalf("buildCodePrompt: %v", err)
+	}
+	for _, want := range []string{"PROJ-1", "title", "desc"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q: %s", want, got)
 		}

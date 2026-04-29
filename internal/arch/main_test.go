@@ -16,6 +16,7 @@ import (
 	"github.com/randheer094/velocity/internal/config"
 	"github.com/randheer094/velocity/internal/db"
 	"github.com/randheer094/velocity/internal/jira"
+	"github.com/randheer094/velocity/internal/prompts"
 )
 
 var (
@@ -141,6 +142,10 @@ esac
 	config.SetDir(dir)
 	jira.Reinit()
 
+	if err := seedFixturePromptsForMain(dir); err != nil {
+		panic(err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := db.Start(ctx); err != nil {
@@ -164,6 +169,38 @@ func requireDB(t *testing.T) {
 	if !dbReady {
 		t.Skip("db not available")
 	}
+}
+
+// seedFixturePromptsForMain installs a small resource cache + loads it
+// so TestMain's environment matches what a real `velocity setup` would
+// produce. Used by TestMain only; per-test installations use
+// loadFixturePrompts which goes through prompts.SetForTest.
+func seedFixturePromptsForMain(dir string) error {
+	resDir := filepath.Join(dir, "resources")
+	files := map[string]string{
+		"prompts/manifest.yaml": `version: 0
+prompts:
+  - id: arch_plan
+    path: arch/plan.md
+    placeholders: [PlanBegin, PlanEnd, ParentKey, Requirement]
+  - id: failure_jira
+    path: failure/jira.md
+    placeholders: [Role, Stage, Message]
+`,
+		"prompts/arch/plan.md":    "{{.PlanBegin}} parent={{.ParentKey}} req={{.Requirement}} {{.PlanEnd}}",
+		"prompts/failure/jira.md": "Velocity {{.Role}} failed at stage {{.Stage}}: {{.Message}}",
+		"VERSION":                 "v0.0.0",
+	}
+	for rel, body := range files {
+		full := filepath.Join(resDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	return prompts.Load(resDir)
 }
 
 // cleanPlan removes any residual plan rows (and children) for parentKey so
