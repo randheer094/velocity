@@ -84,6 +84,32 @@ func TestRunCloneFailureRecordsFailure(t *testing.T) {
 	}
 }
 
+func TestRunMissingGithubTokenRecordsFailure(t *testing.T) {
+	requireDB(t)
+	t.Setenv("GH_TOKEN", "")
+	ctx := context.Background()
+	plan := &data.Plan{
+		ParentJiraKey: "ARCH-RUN-NOTOKEN",
+		Name:          "x",
+		RepoURL:       "https://github.com/owner/repo",
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "x"}}}},
+	}
+	if err := db.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkPlanFailed(ctx, "ARCH-RUN-NOTOKEN", "Planning Failed", "x", "y"); err != nil {
+		t.Fatal(err)
+	}
+	Run(ctx, "ARCH-RUN-NOTOKEN", "https://github.com/owner/repo", "t", "do thing")
+	got, _ := db.GetPlan(ctx, "ARCH-RUN-NOTOKEN")
+	if got == nil || got.Status != data.PlanPlanningFailed {
+		t.Errorf("plan = %+v", got)
+	}
+	if got != nil && got.LastErrorStage != "verify-token" {
+		t.Errorf("expected failure at verify-token stage, got %q", got.LastErrorStage)
+	}
+}
+
 func TestRunRetryGuardTerminalIgnored(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
