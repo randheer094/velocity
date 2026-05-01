@@ -4,6 +4,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,15 +43,22 @@ func runEnv(ctx context.Context, dir string, extraEnv []string, args ...string) 
 // the token never appears in cmd.Args (and therefore never in any
 // error string). Falls through to plain run when GH_TOKEN is unset
 // so anonymous operations against public remotes keep working.
+//
+// GitHub's Git-over-HTTPS endpoint canonically accepts HTTP Basic
+// auth with `x-access-token` as the username and the PAT as the
+// password (the same scheme used by actions/checkout). Bearer auth
+// works for the REST API but is rejected for git operations on
+// some token types with `remote: invalid credentials`.
 func runAuthed(ctx context.Context, dir string, args ...string) (string, error) {
 	token := os.Getenv(config.GithubTokenEnv)
 	if token == "" {
 		return run(ctx, dir, args...)
 	}
+	creds := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 	env := []string{
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: bearer " + token,
+		"GIT_CONFIG_VALUE_0=Authorization: Basic " + creds,
 	}
 	return runEnv(ctx, dir, env, args...)
 }
@@ -64,6 +72,8 @@ func redactSecrets(s string) string {
 	}
 	if t := os.Getenv(config.GithubTokenEnv); t != "" {
 		s = strings.ReplaceAll(s, t, "[REDACTED]")
+		creds := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + t))
+		s = strings.ReplaceAll(s, creds, "[REDACTED]")
 	}
 	return s
 }

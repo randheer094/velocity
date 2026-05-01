@@ -113,6 +113,11 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 		}
 	}
 
+	*stage = "verify-token"
+	if strings.Contains(repoURL, "github.com") && os.Getenv(config.GithubTokenEnv) == "" {
+		return fmt.Errorf("%s env var not set", config.GithubTokenEnv)
+	}
+
 	*stage = "clone"
 	workspace := config.WorkspacePath(parentKey)
 	_ = os.RemoveAll(workspace)
