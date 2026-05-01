@@ -48,23 +48,31 @@ func TestRecordFailureNoExistingPlan(t *testing.T) {
 	recordFailure(context.Background(), "ARCH-FAIL-NOPLAN", "stage", errors.New("boom"))
 }
 
-// TestOnDismissedAlreadyDoneSubtask exercises the cascade switch's
-// Done-status skip branch.
-func TestOnDismissedAlreadyDoneSubtask(t *testing.T) {
+// TestOnDismissedCascadesCodingFailed verifies that a coding_failed
+// (Dev Failed) sub-task is transitioned by the cascade. WORKFLOW.md
+// classifies coding_failed as non-terminal — it blocks the wave
+// until retried or dismissed — so a parent dismissal must carry it
+// through too.
+func TestOnDismissedCascadesCodingFailed(t *testing.T) {
 	requireDB(t)
 	ctx := context.Background()
 	plan := &data.Plan{
-		ParentJiraKey: "ARCH-DC-DONE",
+		ParentJiraKey: "ARCH-DC-DEVFAIL",
 		Name:          "x",
 		RepoURL:       "r",
-		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "a", JiraKey: "ARCH-DC-DONE-1"}}}},
+		Waves:         []data.Wave{{Tasks: []data.PlannedTask{{Title: "a", JiraKey: "ARCH-DC-DEVFAIL-1"}}}},
 	}
 	if err := db.SavePlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	statusOverride.Store("ARCH-DC-DONE-1", "Dev Failed")
-	if err := OnDismissed(ctx, "ARCH-DC-DONE", "Dismissed"); err != nil {
+	statusOverride.Store("ARCH-DC-DEVFAIL-1", "Dev Failed")
+	transitionsLog.Delete("ARCH-DC-DEVFAIL-1")
+	if err := OnDismissed(ctx, "ARCH-DC-DEVFAIL", "Dismissed"); err != nil {
 		t.Fatalf("OnDismissed: %v", err)
+	}
+	got, ok := transitionsLog.Load("ARCH-DC-DEVFAIL-1")
+	if !ok || got.(string) != "12" {
+		t.Errorf("expected Dismissed transition (id 12) on coding_failed sub-task, got ok=%v id=%v", ok, got)
 	}
 }
 

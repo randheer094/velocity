@@ -95,15 +95,17 @@ func Start(ctx context.Context, llmWorkers, queueSize int) {
 
 // Enqueue persists a job row on the queue implied by its kind. Drops +
 // logs when the pending backlog for that queue exceeds the soft cap,
-// preserving the "never block the webhook handler" contract.
-func Enqueue(kind, name string, payload any) {
+// preserving the "never block the webhook handler" contract. Returns
+// true on success so callers can fall back to a synchronous step
+// when the queue is full or down.
+func Enqueue(kind, name string, payload any) bool {
 	queueMu.Lock()
 	started := queueStart
 	cap := queueSoftCap
 	queueMu.Unlock()
 	if !started {
 		slog.Error("workqueue not started, dropping job", "kind", kind, "name", name)
-		return
+		return false
 	}
 
 	queue := QueueForKind(kind)
@@ -116,16 +118,17 @@ func Enqueue(kind, name string, payload any) {
 			slog.Error("workqueue full, dropping job",
 				"queue", queue, "kind", kind, "name", name,
 				"pending", pending, "cap", cap)
-			return
+			return false
 		}
 	}
 
 	id, err := insertJob(ctx, queue, kind, name, payload)
 	if err != nil {
 		slog.Error("workqueue: insert failed", "queue", queue, "kind", kind, "name", name, "err", err)
-		return
+		return false
 	}
 	slog.Info("workqueue: enqueued", "id", id, "queue", queue, "kind", kind, "name", name)
+	return true
 }
 
 // Started reports whether Start has run and Drain hasn't. Used by

@@ -3,6 +3,7 @@ package jira
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,10 @@ const (
 	apiPath        = "/rest/api/3/"
 	maxLogBody     = 200
 	requestTimeout = 30 * time.Second
+	// maxResponseBytes caps how much of a Jira response body the client
+	// will buffer. Real REST replies sit well below this; the cap stops
+	// a misbehaving proxy or compromised tenant from exhausting memory.
+	maxResponseBytes = 16 << 20
 )
 
 type Client struct {
@@ -70,7 +75,7 @@ func (c *Client) url(path string, query url.Values) string {
 	return u
 }
 
-func (c *Client) do(method, path string, query url.Values, body any) (*http.Response, []byte, error) {
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any) (*http.Response, []byte, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -79,7 +84,7 @@ func (c *Client) do(method, path string, query url.Values, body any) (*http.Resp
 		}
 		bodyReader = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, c.url(path, query), bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.url(path, query), bodyReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -93,7 +98,7 @@ func (c *Client) do(method, path string, query url.Values, body any) (*http.Resp
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	return resp, respBody, nil
 }
 
@@ -108,14 +113,14 @@ func truncate(s string, n int) string {
 // stay single-shot — not generally retry-safe.
 var getBackoffs = []time.Duration{500 * time.Millisecond, 2 * time.Second, 8 * time.Second}
 
-func (c *Client) get(path string, query url.Values) any {
+func (c *Client) get(ctx context.Context, path string, query url.Values) any {
 	var (
 		resp *http.Response
 		body []byte
 		err  error
 	)
 	for attempt := 0; attempt <= len(getBackoffs); attempt++ {
-		resp, body, err = c.do(http.MethodGet, path, query, nil)
+		resp, body, err = c.do(ctx, http.MethodGet, path, query, nil)
 		if !shouldRetryGet(resp, err) {
 			break
 		}
@@ -123,7 +128,10 @@ func (c *Client) get(path string, query url.Values) any {
 			break
 		}
 		slog.Warn("jira GET retrying", "url", c.url(path, query), "attempt", attempt+1)
-		time.Sleep(getBackoffs[attempt])
+		if !sleepCtx(ctx, getBackoffs[attempt]) {
+			err = ctx.Err()
+			break
+		}
 	}
 	if err != nil {
 		slog.Error("jira GET error", "url", c.url(path, query), "err", err)
@@ -141,6 +149,19 @@ func (c *Client) get(path string, query url.Values) any {
 	return out
 }
 
+// sleepCtx waits for d or until ctx fires. Returns false when ctx
+// cancelled before the timer expired so callers can abort early.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func shouldRetryGet(resp *http.Response, err error) bool {
 	if err != nil {
 		return true
@@ -148,8 +169,8 @@ func shouldRetryGet(resp *http.Response, err error) bool {
 	return resp.StatusCode == 429 || resp.StatusCode >= 500
 }
 
-func (c *Client) post(path string, payload any) any {
-	resp, body, err := c.do(http.MethodPost, path, nil, payload)
+func (c *Client) post(ctx context.Context, path string, payload any) any {
+	resp, body, err := c.do(ctx, http.MethodPost, path, nil, payload)
 	if err != nil {
 		slog.Error("jira POST error", "url", c.url(path, nil), "err", err)
 		return nil
@@ -169,8 +190,8 @@ func (c *Client) post(path string, payload any) any {
 	return out
 }
 
-func (c *Client) put(path string, payload any) bool {
-	resp, body, err := c.do(http.MethodPut, path, nil, payload)
+func (c *Client) put(ctx context.Context, path string, payload any) bool {
+	resp, body, err := c.do(ctx, http.MethodPut, path, nil, payload)
 	if err != nil {
 		slog.Error("jira PUT error", "url", c.url(path, nil), "err", err)
 		return false
@@ -182,14 +203,14 @@ func (c *Client) put(path string, payload any) bool {
 	return true
 }
 
-func (c *Client) GetIssue(key string) map[string]any {
-	raw := c.get("issue/"+key, nil)
+func (c *Client) GetIssue(ctx context.Context, key string) map[string]any {
+	raw := c.get(ctx, "issue/"+key, nil)
 	root, _ := raw.(map[string]any)
 	return root
 }
 
-func (c *Client) GetIssueBrief(key string) *status.IssueInfo {
-	raw := c.get("issue/"+key, url.Values{"fields": {"status,assignee"}})
+func (c *Client) GetIssueBrief(ctx context.Context, key string) *status.IssueInfo {
+	raw := c.get(ctx, "issue/"+key, url.Values{"fields": {"status,assignee"}})
 	root, ok := raw.(map[string]any)
 	if !ok {
 		return nil
@@ -205,7 +226,7 @@ func (c *Client) GetIssueBrief(key string) *status.IssueInfo {
 	return &status.IssueInfo{Key: key, Status: statusName, AssigneeAccountID: assigneeID}
 }
 
-func (c *Client) GetTasksStatus(issueKeys []string) map[string]status.IssueInfo {
+func (c *Client) GetTasksStatus(ctx context.Context, issueKeys []string) map[string]status.IssueInfo {
 	out := map[string]status.IssueInfo{}
 	if len(issueKeys) == 0 {
 		return out
@@ -215,7 +236,7 @@ func (c *Client) GetTasksStatus(issueKeys []string) map[string]status.IssueInfo 
 	q.Set("jql", jql)
 	q.Set("fields", "status,assignee")
 	q.Set("maxResults", fmt.Sprintf("%d", len(issueKeys)))
-	raw := c.get("search/jql", q)
+	raw := c.get(ctx, "search/jql", q)
 	if raw == nil {
 		return out
 	}
@@ -247,8 +268,8 @@ func (c *Client) GetTasksStatus(issueKeys []string) map[string]status.IssueInfo 
 	return out
 }
 
-func (c *Client) Assign(issueKey, accountID string) bool {
-	ok := c.put("issue/"+issueKey+"/assignee", map[string]string{"accountId": accountID})
+func (c *Client) Assign(ctx context.Context, issueKey, accountID string) bool {
+	ok := c.put(ctx, "issue/"+issueKey+"/assignee", map[string]string{"accountId": accountID})
 	if ok {
 		slog.Info("jira assigned", "key", issueKey, "accountId", accountID)
 	}
@@ -257,12 +278,12 @@ func (c *Client) Assign(issueKey, accountID string) bool {
 
 // Transition finds the transition whose target status matches
 // case-insensitively, then executes it.
-func (c *Client) Transition(issueKey, targetStatus string) bool {
+func (c *Client) Transition(ctx context.Context, issueKey, targetStatus string) bool {
 	if targetStatus == "" {
 		slog.Error("jira transition skipped: empty target status", "key", issueKey)
 		return false
 	}
-	raw := c.get("issue/"+issueKey+"/transitions", nil)
+	raw := c.get(ctx, "issue/"+issueKey+"/transitions", nil)
 	if raw == nil {
 		return false
 	}
@@ -290,7 +311,7 @@ func (c *Client) Transition(issueKey, targetStatus string) bool {
 		slog.Error("jira transition target not found", "key", issueKey, "status", targetStatus, "available", available)
 		return false
 	}
-	result := c.post("issue/"+issueKey+"/transitions", map[string]any{"transition": map[string]string{"id": matchID}})
+	result := c.post(ctx, "issue/"+issueKey+"/transitions", map[string]any{"transition": map[string]string{"id": matchID}})
 	if result != nil {
 		slog.Info("jira transitioned", "key", issueKey, "status", targetStatus)
 		return true
@@ -299,7 +320,7 @@ func (c *Client) Transition(issueKey, targetStatus string) bool {
 }
 
 // CreateSubtask returns the new issue key, or "" on failure.
-func (c *Client) CreateSubtask(projectKey, summary, description, parentKey string) string {
+func (c *Client) CreateSubtask(ctx context.Context, projectKey, summary, description, parentKey string) string {
 	payload := map[string]any{
 		"fields": map[string]any{
 			"project":   map[string]string{"key": projectKey},
@@ -313,7 +334,7 @@ func (c *Client) CreateSubtask(projectKey, summary, description, parentKey strin
 			},
 		},
 	}
-	raw := c.post("issue", payload)
+	raw := c.post(ctx, "issue", payload)
 	root, ok := raw.(map[string]any)
 	if !ok {
 		return ""
@@ -323,7 +344,7 @@ func (c *Client) CreateSubtask(projectKey, summary, description, parentKey strin
 }
 
 // CommentIssue wraps body in an ADF paragraph. Returns false on error.
-func (c *Client) CommentIssue(issueKey, body string) bool {
+func (c *Client) CommentIssue(ctx context.Context, issueKey, body string) bool {
 	payload := map[string]any{
 		"body": map[string]any{
 			"type":    "doc",
@@ -338,14 +359,14 @@ func (c *Client) CommentIssue(issueKey, body string) bool {
 			},
 		},
 	}
-	raw := c.post("issue/"+issueKey+"/comment", payload)
+	raw := c.post(ctx, "issue/"+issueKey+"/comment", payload)
 	return raw != nil
 }
 
 // CommentIssueCode posts body inside an ADF codeBlock so monospace
 // content (e.g. ASCII diagrams) keeps its alignment when rendered.
-func (c *Client) CommentIssueCode(issueKey, body string) bool {
-	return c.CommentIssueADF(issueKey, []any{
+func (c *Client) CommentIssueCode(ctx context.Context, issueKey, body string) bool {
+	return c.CommentIssueADF(ctx, issueKey, []any{
 		map[string]any{
 			"type": "codeBlock",
 			"content": []any{
@@ -357,7 +378,7 @@ func (c *Client) CommentIssueCode(issueKey, body string) bool {
 
 // CommentIssueADF posts a comment whose body content is the caller-supplied
 // ADF node slice. The doc/version envelope is applied here.
-func (c *Client) CommentIssueADF(issueKey string, content []any) bool {
+func (c *Client) CommentIssueADF(ctx context.Context, issueKey string, content []any) bool {
 	payload := map[string]any{
 		"body": map[string]any{
 			"type":    "doc",
@@ -365,12 +386,12 @@ func (c *Client) CommentIssueADF(issueKey string, content []any) bool {
 			"content": content,
 		},
 	}
-	raw := c.post("issue/"+issueKey+"/comment", payload)
+	raw := c.post(ctx, "issue/"+issueKey+"/comment", payload)
 	return raw != nil
 }
 
-func (c *Client) ListSubtasks(parentKey string) []string {
-	raw := c.get("issue/"+parentKey, url.Values{"fields": {"subtasks"}})
+func (c *Client) ListSubtasks(ctx context.Context, parentKey string) []string {
+	raw := c.get(ctx, "issue/"+parentKey, url.Values{"fields": {"subtasks"}})
 	root, ok := raw.(map[string]any)
 	if !ok {
 		return nil

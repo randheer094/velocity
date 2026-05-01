@@ -120,7 +120,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "transition-coding"
 	if coding := status.SubtaskJiraName(status.Coding); coding != "" {
-		if !jiraClient.Transition(issueKey, coding) {
+		if !jiraClient.Transition(ctx, issueKey, coding) {
 			slog.Error("code: transition to coding failed", "key", issueKey, "target", coding)
 		}
 	}
@@ -137,7 +137,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	if err := os.MkdirAll(config.WorkspaceDir, 0o755); err != nil {
 		return err
 	}
-	if err := git.Clone(repoURL, workspace); err != nil {
+	if err := git.Clone(ctx, repoURL, workspace); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 	if err := configureAuthRemote(workspace, repoFullName); err != nil {
@@ -145,13 +145,13 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	}
 
 	*stage = "default-branch"
-	baseBranch, err := git.DefaultBranch(workspace)
+	baseBranch, err := git.DefaultBranch(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("default branch: %w", err)
 	}
 
 	*stage = "checkout-branch"
-	if err := git.CheckoutNewBranch(workspace, issueKey); err != nil {
+	if err := git.CheckoutNewBranch(ctx, workspace, issueKey); err != nil {
 		return fmt.Errorf("branch: %w", err)
 	}
 
@@ -169,7 +169,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "commit"
 	commitMsg := fmt.Sprintf("%s: %s", issueKey, title)
-	committed, err := git.AddAllAndCommit(workspace, commitMsg)
+	committed, err := git.AddAllAndCommit(ctx, workspace, commitMsg)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -179,11 +179,11 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 
 	*stage = "push"
 	if forcePush {
-		if err := git.PushForceWithLease(workspace, issueKey); err != nil {
+		if err := git.PushForceWithLease(ctx, workspace, issueKey); err != nil {
 			return fmt.Errorf("push (force-with-lease): %w", err)
 		}
 	} else {
-		if err := git.Push(workspace, issueKey); err != nil {
+		if err := git.Push(ctx, workspace, issueKey); err != nil {
 			return fmt.Errorf("push: %w", err)
 		}
 	}
@@ -191,6 +191,7 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 	*stage = "open-pr"
 	jiraURL := fmt.Sprintf("%s/browse/%s", cfg.Jira.BaseURL, issueKey)
 	prURL := github.New().CreateOrUpdatePR(
+		ctx,
 		repoFullName,
 		commitMsg,
 		BuildPRBody(title, description, issueKey, jiraURL),
@@ -201,22 +202,23 @@ func code(ctx context.Context, issueKey, parentKey, repoURL, title, description 
 		return errors.New("failed to open PR")
 	}
 
+	*stage = "transition-in-review"
+	inReview := status.SubtaskJiraName(status.InReview)
+	if inReview != "" {
+		if !jiraClient.Transition(ctx, issueKey, inReview) {
+			return fmt.Errorf("transition %s to %s failed", issueKey, inReview)
+		}
+	}
+
 	*stage = "save-task-post-pr"
 	task.PRURL = prURL
 	task.Status = data.CodeInReview
-	task.JiraStatus = status.SubtaskJiraName(status.InReview)
+	task.JiraStatus = inReview
 	task.Error = ""
 	task.LastErrorStage = ""
 	task.FailedAt = nil
 	if err := db.SaveCodeTask(ctx, task); err != nil {
 		return fmt.Errorf("save code task (post-pr): %w", err)
-	}
-
-	*stage = "transition-in-review"
-	if task.JiraStatus != "" {
-		if !jiraClient.Transition(issueKey, task.JiraStatus) {
-			slog.Error("code: transition to in-review failed", "key", issueKey, "target", task.JiraStatus)
-		}
 	}
 
 	slog.Info("code: PR open", "key", issueKey, "url", prURL)
@@ -235,7 +237,7 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 	if done == "" {
 		return errors.New("subtask DONE status not configured")
 	}
-	if !client.Transition(issueKey, done) {
+	if !client.Transition(ctx, issueKey, done) {
 		return fmt.Errorf("failed to transition %s to %s", issueKey, done)
 	}
 	task, err := db.GetCodeTask(ctx, issueKey)
@@ -252,8 +254,11 @@ func MarkMerged(ctx context.Context, issueKey, prURL string) error {
 			return fmt.Errorf("save task on merge: %w", err)
 		}
 	}
-	EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
-		map[string]any{"issue_key": issueKey})
+	if !EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
+		map[string]any{"issue_key": issueKey}) {
+		slog.Warn("code: cleanup enqueue dropped, running synchronously", "key", issueKey)
+		_ = Cleanup(ctx, issueKey)
+	}
 	slog.Info("code: merged → done", "key", issueKey)
 	return nil
 }
@@ -269,8 +274,11 @@ func OnDismissed(ctx context.Context, issueKey, jiraStatus string) error {
 	if err := db.MarkCodeDismissed(ctx, issueKey, jiraStatus); err != nil {
 		slog.Warn("code: mark dismissed", "key", issueKey, "err", err)
 	}
-	EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
-		map[string]any{"issue_key": issueKey})
+	if !EnqueueFn(kindCleanup, "code.Cleanup:"+issueKey,
+		map[string]any{"issue_key": issueKey}) {
+		slog.Warn("code: cleanup enqueue dropped, running synchronously", "key", issueKey)
+		_ = Cleanup(ctx, issueKey)
+	}
 	return nil
 }
 

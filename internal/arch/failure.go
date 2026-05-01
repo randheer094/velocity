@@ -59,9 +59,9 @@ func recordFailure(ctx context.Context, parentKey, stage string, err error) {
 	slog.Error("arch: stage failed", "key", parentKey, "stage", stage, "err", err)
 	failedName := status.TaskJiraName(status.PlanningFailed)
 	if client := jira.Shared(); client != nil {
-		_ = client.CommentIssue(parentKey, renderFailureComment("arch", stage, msg))
+		_ = client.CommentIssue(ctx, parentKey, renderFailureComment("arch", stage, msg))
 		if failedName != "" {
-			_ = client.Transition(parentKey, failedName)
+			_ = client.Transition(ctx, parentKey, failedName)
 		}
 	}
 	if err := db.MarkPlanFailed(ctx, parentKey, failedName, stage, msg); err != nil {

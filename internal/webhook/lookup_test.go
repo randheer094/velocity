@@ -29,7 +29,7 @@ func TestExtractRepoURLVariants(t *testing.T) {
 }
 
 func TestLookupParentRepoNoClient(t *testing.T) {
-	if got := lookupParentRepo("PROJ-1", "f"); got != "" {
+	if got := lookupParentRepo(t.Context(), "PROJ-1", "f"); got != "" {
 		t.Errorf("got = %q", got)
 	}
 }
@@ -56,13 +56,13 @@ func TestLookupParentRepoFull(t *testing.T) {
 		jira.Reinit()
 	})
 
-	got := lookupParentRepo("PROJ-1", "customfield_repo")
+	got := lookupParentRepo(t.Context(), "PROJ-1", "customfield_repo")
 	if got != "https://github.com/o/r.git" {
 		t.Errorf("got = %q", got)
 	}
 
 	// Server returns 404 for missing key → GetIssue returns nil → "" returned.
-	if got := lookupParentRepo("PROJ-XX", "customfield_repo"); got != "" {
+	if got := lookupParentRepo(t.Context(), "PROJ-XX", "customfield_repo"); got != "" {
 		t.Errorf("missing key: %q", got)
 	}
 }

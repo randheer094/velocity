@@ -3,6 +3,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,12 +17,12 @@ import (
 // credential never blocks waiting on stdin. Errors include the args
 // (never the env), so a token injected via runAuthed cannot leak.
 // stderr is redacted on the off chance git echoes it.
-func run(dir string, args ...string) (string, error) {
-	return runEnv(dir, nil, args...)
+func run(ctx context.Context, dir string, args ...string) (string, error) {
+	return runEnv(ctx, dir, nil, args...)
 }
 
-func runEnv(dir string, extraEnv []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+func runEnv(ctx context.Context, dir string, extraEnv []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -41,17 +42,17 @@ func runEnv(dir string, extraEnv []string, args ...string) (string, error) {
 // the token never appears in cmd.Args (and therefore never in any
 // error string). Falls through to plain run when GH_TOKEN is unset
 // so anonymous operations against public remotes keep working.
-func runAuthed(dir string, args ...string) (string, error) {
+func runAuthed(ctx context.Context, dir string, args ...string) (string, error) {
 	token := os.Getenv(config.GithubTokenEnv)
 	if token == "" {
-		return run(dir, args...)
+		return run(ctx, dir, args...)
 	}
 	env := []string{
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
 		"GIT_CONFIG_VALUE_0=Authorization: bearer " + token,
 	}
-	return runEnv(dir, env, args...)
+	return runEnv(ctx, dir, env, args...)
 }
 
 // redactSecrets is a best-effort scrubber for tokens that may appear in
@@ -67,14 +68,14 @@ func redactSecrets(s string) string {
 	return s
 }
 
-func Clone(repoURL, dst string) error {
-	_, err := runAuthed("", "clone", repoURL, dst)
+func Clone(ctx context.Context, repoURL, dst string) error {
+	_, err := runAuthed(ctx, "", "clone", repoURL, dst)
 	return err
 }
 
 // DefaultBranch returns the upstream HEAD's branch (typically main).
-func DefaultBranch(repoDir string) (string, error) {
-	out, err := run(repoDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := run(ctx, repoDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -100,44 +101,44 @@ func ConfigureAuthenticatedRemote(repoDir, repoFullName string) error {
 }
 
 // CheckoutNewBranch uses `checkout -B`: creates or resets branchName.
-func CheckoutNewBranch(repoDir, branchName string) error {
-	if _, err := run(repoDir, "checkout", "-B", branchName); err != nil {
+func CheckoutNewBranch(ctx context.Context, repoDir, branchName string) error {
+	if _, err := run(ctx, repoDir, "checkout", "-B", branchName); err != nil {
 		return err
 	}
 	return nil
 }
 
-func Push(repoDir, branchName string) error {
-	_, err := runAuthed(repoDir, "push", "-u", "origin", branchName)
+func Push(ctx context.Context, repoDir, branchName string) error {
+	_, err := runAuthed(ctx, repoDir, "push", "-u", "origin", branchName)
 	return err
 }
 
 // FetchAll updates every remote ref so RebaseOnto and CheckoutBranch
 // can see the latest origin state.
-func FetchAll(repoDir string) error {
-	_, err := runAuthed(repoDir, "fetch", "--all", "--prune")
+func FetchAll(ctx context.Context, repoDir string) error {
+	_, err := runAuthed(ctx, repoDir, "fetch", "--all", "--prune")
 	return err
 }
 
 // CheckoutBranch switches to an existing branch without creating one.
-func CheckoutBranch(repoDir, branchName string) error {
-	_, err := run(repoDir, "checkout", branchName)
+func CheckoutBranch(ctx context.Context, repoDir, branchName string) error {
+	_, err := run(ctx, repoDir, "checkout", branchName)
 	return err
 }
 
 // ResetHardToRemote points the current branch at origin/<branchName>
 // so iteration picks up any commits pushed after the workspace was
 // created (e.g. maintainer pushes while CI was failing).
-func ResetHardToRemote(repoDir, branchName string) error {
-	_, err := run(repoDir, "reset", "--hard", "origin/"+branchName)
+func ResetHardToRemote(ctx context.Context, repoDir, branchName string) error {
+	_, err := run(ctx, repoDir, "reset", "--hard", "origin/"+branchName)
 	return err
 }
 
 // RebaseOnto rebases the current branch onto origin/<baseBranch>.
 // On conflict the rebase is aborted before the error returns.
-func RebaseOnto(repoDir, baseBranch string) error {
-	if _, err := run(repoDir, "rebase", "origin/"+baseBranch); err != nil {
-		_, _ = run(repoDir, "rebase", "--abort")
+func RebaseOnto(ctx context.Context, repoDir, baseBranch string) error {
+	if _, err := run(ctx, repoDir, "rebase", "origin/"+baseBranch); err != nil {
+		_, _ = run(ctx, repoDir, "rebase", "--abort")
 		return err
 	}
 	return nil
@@ -151,25 +152,25 @@ func WorkspaceExists(repoDir string) bool {
 
 // PushForceWithLease refreshes an existing PR branch on code retry;
 // fails rather than clobbers if the remote has moved.
-func PushForceWithLease(repoDir, branchName string) error {
-	_, err := runAuthed(repoDir, "push", "--force-with-lease", "-u", "origin", branchName)
+func PushForceWithLease(ctx context.Context, repoDir, branchName string) error {
+	_, err := runAuthed(ctx, repoDir, "push", "--force-with-lease", "-u", "origin", branchName)
 	return err
 }
 
-func HasChanges(repoDir string) bool {
-	out, _ := run(repoDir, "status", "--porcelain")
+func HasChanges(ctx context.Context, repoDir string) bool {
+	out, _ := run(ctx, repoDir, "status", "--porcelain")
 	return out != ""
 }
 
 // AddAllAndCommit returns false if there's nothing to commit.
-func AddAllAndCommit(repoDir, message string) (bool, error) {
-	if !HasChanges(repoDir) {
+func AddAllAndCommit(ctx context.Context, repoDir, message string) (bool, error) {
+	if !HasChanges(ctx, repoDir) {
 		return false, nil
 	}
-	if _, err := run(repoDir, "add", "-A"); err != nil {
+	if _, err := run(ctx, repoDir, "add", "-A"); err != nil {
 		return false, err
 	}
-	if _, err := run(repoDir, "commit", "-m", message); err != nil {
+	if _, err := run(ctx, repoDir, "commit", "-m", message); err != nil {
 		return false, err
 	}
 	slog.Info("git commit", "dir", repoDir, "msg", message)

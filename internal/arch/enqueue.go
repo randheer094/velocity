@@ -5,7 +5,7 @@ package arch
 // pre-startup it's a no-op so unit tests that don't care about
 // queueing can ignore it. Keeps arch from importing webhook (and
 // closing the import cycle that webhook → arch already opens).
-var EnqueueFn = func(kind, name string, payload any) {}
+var EnqueueFn = func(kind, name string, payload any) bool { return false }
 
 // Kind strings for follow-ups arch enqueues. Mirror of the canonical
 // definitions in internal/webhook/dispatch.go; kept private to arch

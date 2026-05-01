@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -885,7 +886,7 @@ func TestStripLogTimestamp(t *testing.T) {
 func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
 	cap := startCapturingQueue(t)
 	oldFetch := fetchWorkflowFailureSummary
-	fetchWorkflowFailureSummary = func(string, int64) string { return "error: boom" }
+	fetchWorkflowFailureSummary = func(context.Context, string, int64) string { return "error: boom" }
 	defer func() { fetchWorkflowFailureSummary = oldFetch }()
 
 	rec := httptest.NewRecorder()
@@ -909,7 +910,7 @@ func TestGithubHandlerWorkflowRunHappyPath(t *testing.T) {
 func TestGithubHandlerIssueCommentHappyPath(t *testing.T) {
 	cap := startCapturingQueue(t)
 	oldLookup := lookupBranchForPR
-	lookupBranchForPR = func(string, int) string { return "feature/x" }
+	lookupBranchForPR = func(context.Context, string, int) string { return "feature/x" }
 	defer func() { lookupBranchForPR = oldLookup }()
 
 	rec := httptest.NewRecorder()
@@ -949,7 +950,7 @@ func TestGithubHandlerIssueCommentEmptyAfterPrefix(t *testing.T) {
 func TestGithubHandlerWorkflowRunStubbedSummary(t *testing.T) {
 	cap := startCapturingQueue(t)
 	old := fetchWorkflowFailureSummary
-	fetchWorkflowFailureSummary = func(string, int64) string { return "error: sentinel" }
+	fetchWorkflowFailureSummary = func(context.Context, string, int64) string { return "error: sentinel" }
 	defer func() { fetchWorkflowFailureSummary = old }()
 
 	rec := httptest.NewRecorder()
@@ -971,10 +972,10 @@ func TestGithubHandlerWorkflowRunStubbedSummary(t *testing.T) {
 }
 
 func TestFetchWorkflowFailureSummaryEmptyInputs(t *testing.T) {
-	if got := fetchWorkflowFailureSummary("", 1); got != "" {
+	if got := fetchWorkflowFailureSummary(t.Context(), "", 1); got != "" {
 		t.Errorf("empty repo should return empty: %q", got)
 	}
-	if got := fetchWorkflowFailureSummary("o/r", 0); got != "" {
+	if got := fetchWorkflowFailureSummary(t.Context(), "o/r", 0); got != "" {
 		t.Errorf("zero run id should return empty: %q", got)
 	}
 }
@@ -984,7 +985,7 @@ func TestGithubHandlerIssueCommentNoBranch(t *testing.T) {
 	// deleted PR), the handler ignores the comment rather than
 	// enqueuing an iterate with an empty branch.
 	oldLookup := lookupBranchForPR
-	lookupBranchForPR = func(string, int) string { return "" }
+	lookupBranchForPR = func(context.Context, string, int) string { return "" }
 	defer func() { lookupBranchForPR = oldLookup }()
 	cap := startCapturingQueue(t)
 
