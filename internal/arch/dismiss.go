@@ -52,8 +52,7 @@ func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 			if !ok {
 				continue
 			}
-			switch status.SubtaskCanonical(info.Status) {
-			case status.Done, status.CodingFailed:
+			if status.SubtaskCanonical(info.Status) == status.Done {
 				continue
 			}
 			if !client.Transition(key, dismissedName) {

@@ -158,7 +158,7 @@ var fetchWorkflowFailureSummary = func(repoFullName string, runID int64) string 
 }
 
 // buildWorkflowRunInstruction composes the /velocity-free iterate
-// prompt that carries the failing CI context to the coder.
+// prompt that carries the failing CI context to code.Iterate.
 func buildWorkflowRunInstruction(name, htmlURL, summary string) string {
 	if summary != "" {
 		return fmt.Sprintf(
