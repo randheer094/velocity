@@ -46,7 +46,7 @@ func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 				}
 			}
 		}
-		infos := client.GetTasksStatus(subKeys)
+		infos := client.GetTasksStatus(ctx, subKeys)
 		for _, key := range subKeys {
 			info, ok := infos[key]
 			if !ok {
@@ -55,7 +55,7 @@ func OnDismissed(ctx context.Context, parentKey, jiraStatus string) error {
 			if status.SubtaskCanonical(info.Status) == status.Done {
 				continue
 			}
-			if !client.Transition(key, dismissedName) {
+			if !client.Transition(ctx, key, dismissedName) {
 				slog.Warn("arch: cascade dismiss failed", "parent", parentKey, "sub", key)
 			}
 		}

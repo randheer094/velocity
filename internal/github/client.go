@@ -3,6 +3,7 @@ package github
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,14 +46,14 @@ func New() *Client {
 // PATCHes stay single-shot.
 var getBackoffs = []time.Duration{500 * time.Millisecond, 2 * time.Second, 8 * time.Second}
 
-func (c *Client) getWithRetry(path string) (*http.Response, []byte, error) {
+func (c *Client) getWithRetry(ctx context.Context, path string) (*http.Response, []byte, error) {
 	var (
 		resp *http.Response
 		body []byte
 		err  error
 	)
 	for attempt := 0; attempt <= len(getBackoffs); attempt++ {
-		resp, body, err = c.do(http.MethodGet, path, nil)
+		resp, body, err = c.do(ctx, http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode != 429 && resp.StatusCode < 500 {
 			return resp, body, nil
 		}
@@ -60,12 +61,14 @@ func (c *Client) getWithRetry(path string) (*http.Response, []byte, error) {
 			break
 		}
 		slog.Warn("github GET retrying", "path", path, "attempt", attempt+1)
-		time.Sleep(getBackoffs[attempt])
+		if !sleepCtx(ctx, getBackoffs[attempt]) {
+			return resp, body, ctx.Err()
+		}
 	}
 	return resp, body, err
 }
 
-func (c *Client) do(method, path string, body any) (*http.Response, []byte, error) {
+func (c *Client) do(ctx context.Context, method, path string, body any) (*http.Response, []byte, error) {
 	var r io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -74,11 +77,13 @@ func (c *Client) do(method, path string, body any) (*http.Response, []byte, erro
 		}
 		r = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, apiBase+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, r)
 	if err != nil {
 		return nil, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {
@@ -93,20 +98,33 @@ func (c *Client) do(method, path string, body any) (*http.Response, []byte, erro
 	return resp, respBody, nil
 }
 
+// sleepCtx waits for d or until ctx fires. Returns false when ctx
+// cancelled before the timer expired so callers can abort early.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // FindOpenPR returns the URL of an open PR with the given head branch, or "".
-func (c *Client) FindOpenPR(repoFullName, head, base string) string {
-	url, _ := c.findOpenPR(repoFullName, head, base)
+func (c *Client) FindOpenPR(ctx context.Context, repoFullName, head, base string) string {
+	url, _ := c.findOpenPR(ctx, repoFullName, head, base)
 	return url
 }
 
-func (c *Client) findOpenPR(repoFullName, head, base string) (string, int) {
+func (c *Client) findOpenPR(ctx context.Context, repoFullName, head, base string) (string, int) {
 	q := url.Values{}
 	q.Set("state", "open")
 	q.Set("head", strings.SplitN(repoFullName, "/", 2)[0]+":"+head)
 	if base != "" {
 		q.Set("base", base)
 	}
-	resp, body, err := c.getWithRetry("/repos/" + repoFullName + "/pulls?" + q.Encode())
+	resp, body, err := c.getWithRetry(ctx, "/repos/"+repoFullName+"/pulls?"+q.Encode())
 	if err != nil || resp.StatusCode >= 400 {
 		return "", 0
 	}
@@ -127,10 +145,10 @@ func (c *Client) findOpenPR(repoFullName, head, base string) (string, int) {
 
 // CreateOrUpdatePR opens a PR or refreshes an existing open PR on the
 // same branch. Returns the html_url.
-func (c *Client) CreateOrUpdatePR(repoFullName, title, body, head, base string) string {
-	if existing, num := c.findOpenPR(repoFullName, head, base); existing != "" {
+func (c *Client) CreateOrUpdatePR(ctx context.Context, repoFullName, title, body, head, base string) string {
+	if existing, num := c.findOpenPR(ctx, repoFullName, head, base); existing != "" {
 		if num > 0 {
-			c.updatePR(repoFullName, num, title, body)
+			c.updatePR(ctx, repoFullName, num, title, body)
 		}
 		return existing
 	}
@@ -140,7 +158,7 @@ func (c *Client) CreateOrUpdatePR(repoFullName, title, body, head, base string) 
 		"head":  head,
 		"base":  base,
 	}
-	resp, respBody, err := c.do(http.MethodPost, "/repos/"+repoFullName+"/pulls", payload)
+	resp, respBody, err := c.do(ctx, http.MethodPost, "/repos/"+repoFullName+"/pulls", payload)
 	if err != nil {
 		slog.Error("github create PR error", "repo", repoFullName, "err", err)
 		return ""
@@ -157,10 +175,10 @@ func (c *Client) CreateOrUpdatePR(repoFullName, title, body, head, base string) 
 	return u
 }
 
-func (c *Client) updatePR(repoFullName string, number int, title, body string) {
+func (c *Client) updatePR(ctx context.Context, repoFullName string, number int, title, body string) {
 	payload := map[string]any{"title": title, "body": body}
 	path := fmt.Sprintf("/repos/%s/pulls/%d", repoFullName, number)
-	resp, respBody, err := c.do(http.MethodPatch, path, payload)
+	resp, respBody, err := c.do(ctx, http.MethodPatch, path, payload)
 	if err != nil {
 		slog.Warn("github update PR error", "repo", repoFullName, "num", number, "err", err)
 		return
@@ -171,9 +189,9 @@ func (c *Client) updatePR(repoFullName string, number int, title, body string) {
 }
 
 // PRHeadBranch returns the head ref of a PR, or "" on error.
-func (c *Client) PRHeadBranch(repoFullName string, number int) string {
+func (c *Client) PRHeadBranch(ctx context.Context, repoFullName string, number int) string {
 	path := fmt.Sprintf("/repos/%s/pulls/%d", repoFullName, number)
-	resp, body, err := c.getWithRetry(path)
+	resp, body, err := c.getWithRetry(ctx, path)
 	if err != nil || resp.StatusCode >= 400 {
 		return ""
 	}
@@ -190,10 +208,10 @@ func (c *Client) PRHeadBranch(repoFullName string, number int) string {
 
 // AddPRComment posts an issue comment on a pull request. PRs are
 // issues in GitHub's REST model, so this uses /issues/{num}/comments.
-func (c *Client) AddPRComment(repoFullName string, number int, body string) bool {
+func (c *Client) AddPRComment(ctx context.Context, repoFullName string, number int, body string) bool {
 	payload := map[string]any{"body": body}
 	path := fmt.Sprintf("/repos/%s/issues/%d/comments", repoFullName, number)
-	resp, respBody, err := c.do(http.MethodPost, path, payload)
+	resp, respBody, err := c.do(ctx, http.MethodPost, path, payload)
 	if err != nil {
 		slog.Warn("github add comment error", "repo", repoFullName, "num", number, "err", err)
 		return false
@@ -210,12 +228,12 @@ func (c *Client) AddPRComment(repoFullName string, number int, body string) bool
 // tail of each. Returns "" if the run is unknown, the API errors, or
 // nothing failed. Caps per-job and total size so the output fits in
 // an LLM prompt.
-func (c *Client) WorkflowRunFailureSummary(repoFullName string, runID int64) string {
+func (c *Client) WorkflowRunFailureSummary(ctx context.Context, repoFullName string, runID int64) string {
 	const (
 		perJobCap = 4000
 		totalCap  = 8000
 	)
-	jobs := c.listFailedJobs(repoFullName, runID)
+	jobs := c.listFailedJobs(ctx, repoFullName, runID)
 	if len(jobs) == 0 {
 		return ""
 	}
@@ -224,7 +242,7 @@ func (c *Client) WorkflowRunFailureSummary(repoFullName string, runID int64) str
 		if b.Len() >= totalCap {
 			break
 		}
-		log := c.jobLog(repoFullName, j.id)
+		log := c.jobLog(ctx, repoFullName, j.id)
 		if log == "" {
 			continue
 		}
@@ -245,9 +263,9 @@ type failedJob struct {
 	name string
 }
 
-func (c *Client) listFailedJobs(repoFullName string, runID int64) []failedJob {
+func (c *Client) listFailedJobs(ctx context.Context, repoFullName string, runID int64) []failedJob {
 	path := fmt.Sprintf("/repos/%s/actions/runs/%d/jobs", repoFullName, runID)
-	resp, body, err := c.getWithRetry(path)
+	resp, body, err := c.getWithRetry(ctx, path)
 	if err != nil || resp.StatusCode >= 400 {
 		return nil
 	}
@@ -270,9 +288,9 @@ func (c *Client) listFailedJobs(repoFullName string, runID int64) []failedJob {
 	return failed
 }
 
-func (c *Client) jobLog(repoFullName string, jobID int64) string {
+func (c *Client) jobLog(ctx context.Context, repoFullName string, jobID int64) string {
 	path := fmt.Sprintf("/repos/%s/actions/jobs/%d/logs", repoFullName, jobID)
-	resp, body, err := c.getWithRetry(path)
+	resp, body, err := c.getWithRetry(ctx, path)
 	if err != nil || resp.StatusCode >= 400 {
 		return ""
 	}

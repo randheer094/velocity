@@ -60,10 +60,10 @@ func setupRemote(t *testing.T) string {
 func TestCloneAndDefaultBranch(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
-	got, err := DefaultBranch(dst)
+	got, err := DefaultBranch(t.Context(), dst)
 	if err != nil {
 		t.Fatalf("DefaultBranch: %v", err)
 	}
@@ -73,13 +73,13 @@ func TestCloneAndDefaultBranch(t *testing.T) {
 }
 
 func TestCloneError(t *testing.T) {
-	if err := Clone("/nonexistent/repo.git", filepath.Join(t.TempDir(), "x")); err == nil {
+	if err := Clone(t.Context(), "/nonexistent/repo.git", filepath.Join(t.TempDir(), "x")); err == nil {
 		t.Error("expected clone error")
 	}
 }
 
 func TestDefaultBranchError(t *testing.T) {
-	if _, err := DefaultBranch(t.TempDir()); err == nil {
+	if _, err := DefaultBranch(t.Context(), t.TempDir()); err == nil {
 		t.Error("expected error in non-repo dir")
 	}
 }
@@ -87,10 +87,10 @@ func TestDefaultBranchError(t *testing.T) {
 func TestCheckoutNewBranch(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckoutNewBranch(dst, "PROJ-1"); err != nil {
+	if err := CheckoutNewBranch(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatalf("CheckoutNewBranch: %v", err)
 	}
 	out, err := exec.Command("git", "-C", dst, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
@@ -103,7 +103,7 @@ func TestCheckoutNewBranch(t *testing.T) {
 }
 
 func TestCheckoutNewBranchError(t *testing.T) {
-	if err := CheckoutNewBranch(t.TempDir(), "x"); err == nil {
+	if err := CheckoutNewBranch(t.Context(), t.TempDir(), "x"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -111,14 +111,14 @@ func TestCheckoutNewBranchError(t *testing.T) {
 func TestHasChangesAndCommit(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
-	if HasChanges(dst) {
+	if HasChanges(t.Context(), dst) {
 		t.Error("expected no changes initially")
 	}
 
-	committed, err := AddAllAndCommit(dst, "no-op")
+	committed, err := AddAllAndCommit(t.Context(), dst, "no-op")
 	if err != nil || committed {
 		t.Errorf("AddAllAndCommit empty = %v, %v", committed, err)
 	}
@@ -130,10 +130,10 @@ func TestHasChangesAndCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dst, "new.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !HasChanges(dst) {
+	if !HasChanges(t.Context(), dst) {
 		t.Error("expected changes after writing file")
 	}
-	committed, err = AddAllAndCommit(dst, "PROJ-1: something")
+	committed, err = AddAllAndCommit(t.Context(), dst, "PROJ-1: something")
 	if err != nil || !committed {
 		t.Errorf("AddAllAndCommit = %v, %v", committed, err)
 	}
@@ -142,39 +142,39 @@ func TestHasChangesAndCommit(t *testing.T) {
 func TestPushAndForceWithLease(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, dst, "config", "user.email", "t@t")
 	runIn(t, dst, "config", "user.name", "t")
-	if err := CheckoutNewBranch(dst, "feat"); err != nil {
+	if err := CheckoutNewBranch(t.Context(), dst, "feat"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dst, "f.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AddAllAndCommit(dst, "x"); err != nil {
+	if _, err := AddAllAndCommit(t.Context(), dst, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Push(dst, "feat"); err != nil {
+	if err := Push(t.Context(), dst, "feat"); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dst, "f.txt"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AddAllAndCommit(dst, "y"); err != nil {
+	if _, err := AddAllAndCommit(t.Context(), dst, "y"); err != nil {
 		t.Fatal(err)
 	}
-	if err := PushForceWithLease(dst, "feat"); err != nil {
+	if err := PushForceWithLease(t.Context(), dst, "feat"); err != nil {
 		t.Fatalf("PushForceWithLease: %v", err)
 	}
 }
 
 func TestPushError(t *testing.T) {
-	if err := Push(t.TempDir(), "x"); err == nil {
+	if err := Push(t.Context(), t.TempDir(), "x"); err == nil {
 		t.Error("expected push error")
 	}
-	if err := PushForceWithLease(t.TempDir(), "x"); err == nil {
+	if err := PushForceWithLease(t.Context(), t.TempDir(), "x"); err == nil {
 		t.Error("expected push error")
 	}
 }
@@ -183,7 +183,7 @@ func TestConfigureAuthenticatedRemoteMissingToken(t *testing.T) {
 	t.Setenv(config.GithubTokenEnv, "")
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	if err := ConfigureAuthenticatedRemote(dst, "owner/repo"); err == nil {
@@ -195,7 +195,7 @@ func TestConfigureAuthenticatedRemoteWithToken(t *testing.T) {
 	t.Setenv(config.GithubTokenEnv, "abc")
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	if err := ConfigureAuthenticatedRemote(dst, "owner/repo"); err != nil {
@@ -220,7 +220,7 @@ func TestConfigureAuthenticatedRemoteWithToken(t *testing.T) {
 func TestPushErrorRedactsToken(t *testing.T) {
 	const token = "ghp_topsecret_must_not_leak"
 	t.Setenv(config.GithubTokenEnv, token)
-	err := Push(t.TempDir(), "feat")
+	err := Push(t.Context(), t.TempDir(), "feat")
 	if err == nil {
 		t.Fatal("expected push to fail in non-repo dir")
 	}
@@ -235,7 +235,7 @@ func TestWorkspaceExists(t *testing.T) {
 	}
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	if !WorkspaceExists(dst) {
@@ -246,7 +246,7 @@ func TestWorkspaceExists(t *testing.T) {
 func TestFetchAllAndCheckoutBranch(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, dst, "config", "user.email", "t@t")
@@ -254,7 +254,7 @@ func TestFetchAllAndCheckoutBranch(t *testing.T) {
 
 	// Push a branch from a second clone so FetchAll has something to sync.
 	other := filepath.Join(t.TempDir(), "other")
-	if err := Clone(remote, other); err != nil {
+	if err := Clone(t.Context(), remote, other); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, other, "config", "user.email", "t@t")
@@ -267,10 +267,10 @@ func TestFetchAllAndCheckoutBranch(t *testing.T) {
 	runIn(t, other, "commit", "-m", "branch")
 	runIn(t, other, "push", "-u", "origin", "PROJ-1")
 
-	if err := FetchAll(dst); err != nil {
+	if err := FetchAll(t.Context(), dst); err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
-	if err := CheckoutBranch(dst, "PROJ-1"); err != nil {
+	if err := CheckoutBranch(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatalf("CheckoutBranch: %v", err)
 	}
 	out, _ := exec.Command("git", "-C", dst, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
@@ -280,13 +280,13 @@ func TestFetchAllAndCheckoutBranch(t *testing.T) {
 }
 
 func TestFetchAllError(t *testing.T) {
-	if err := FetchAll(t.TempDir()); err == nil {
+	if err := FetchAll(t.Context(), t.TempDir()); err == nil {
 		t.Error("expected error on non-repo")
 	}
 }
 
 func TestCheckoutBranchError(t *testing.T) {
-	if err := CheckoutBranch(t.TempDir(), "x"); err == nil {
+	if err := CheckoutBranch(t.Context(), t.TempDir(), "x"); err == nil {
 		t.Error("expected error on non-repo")
 	}
 }
@@ -294,14 +294,14 @@ func TestCheckoutBranchError(t *testing.T) {
 func TestResetHardToRemoteAndRebase(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, dst, "config", "user.email", "t@t")
 	runIn(t, dst, "config", "user.name", "t")
 
 	// Create feature branch + push it, then diverge main from elsewhere.
-	if err := CheckoutNewBranch(dst, "PROJ-1"); err != nil {
+	if err := CheckoutNewBranch(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dst, "feature.txt"), []byte("f"), 0o644); err != nil {
@@ -309,13 +309,13 @@ func TestResetHardToRemoteAndRebase(t *testing.T) {
 	}
 	runIn(t, dst, "add", ".")
 	runIn(t, dst, "commit", "-m", "feat")
-	if err := Push(dst, "PROJ-1"); err != nil {
+	if err := Push(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Push a new main commit from another clone.
 	other := filepath.Join(t.TempDir(), "other")
-	if err := Clone(remote, other); err != nil {
+	if err := Clone(t.Context(), remote, other); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, other, "config", "user.email", "t@t")
@@ -327,13 +327,13 @@ func TestResetHardToRemoteAndRebase(t *testing.T) {
 	runIn(t, other, "commit", "-m", "main advance")
 	runIn(t, other, "push", "origin", "main")
 
-	if err := FetchAll(dst); err != nil {
+	if err := FetchAll(t.Context(), dst); err != nil {
 		t.Fatal(err)
 	}
-	if err := ResetHardToRemote(dst, "PROJ-1"); err != nil {
+	if err := ResetHardToRemote(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatalf("ResetHardToRemote: %v", err)
 	}
-	if err := RebaseOnto(dst, "main"); err != nil {
+	if err := RebaseOnto(t.Context(), dst, "main"); err != nil {
 		t.Fatalf("RebaseOnto: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dst, "main.txt")); err != nil {
@@ -342,7 +342,7 @@ func TestResetHardToRemoteAndRebase(t *testing.T) {
 }
 
 func TestResetHardToRemoteError(t *testing.T) {
-	if err := ResetHardToRemote(t.TempDir(), "x"); err == nil {
+	if err := ResetHardToRemote(t.Context(), t.TempDir(), "x"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -350,12 +350,12 @@ func TestResetHardToRemoteError(t *testing.T) {
 func TestRebaseOntoConflictAbort(t *testing.T) {
 	remote := setupRemote(t)
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(remote, dst); err != nil {
+	if err := Clone(t.Context(), remote, dst); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, dst, "config", "user.email", "t@t")
 	runIn(t, dst, "config", "user.name", "t")
-	if err := CheckoutNewBranch(dst, "PROJ-1"); err != nil {
+	if err := CheckoutNewBranch(t.Context(), dst, "PROJ-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dst, "README.md"), []byte("feature"), 0o644); err != nil {
@@ -366,7 +366,7 @@ func TestRebaseOntoConflictAbort(t *testing.T) {
 
 	// Advance main with a conflicting edit to README.md via another clone.
 	other := filepath.Join(t.TempDir(), "other")
-	if err := Clone(remote, other); err != nil {
+	if err := Clone(t.Context(), remote, other); err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, other, "config", "user.email", "t@t")
@@ -378,20 +378,20 @@ func TestRebaseOntoConflictAbort(t *testing.T) {
 	runIn(t, other, "commit", "-m", "main change")
 	runIn(t, other, "push", "origin", "main")
 
-	if err := FetchAll(dst); err != nil {
+	if err := FetchAll(t.Context(), dst); err != nil {
 		t.Fatal(err)
 	}
-	if err := RebaseOnto(dst, "main"); err == nil {
+	if err := RebaseOnto(t.Context(), dst, "main"); err == nil {
 		t.Error("expected conflict error")
 	}
 	// After abort, git status must be clean.
-	if HasChanges(dst) {
+	if HasChanges(t.Context(), dst) {
 		t.Error("rebase --abort should have cleaned working tree")
 	}
 }
 
 func TestRebaseOntoError(t *testing.T) {
-	if err := RebaseOnto(t.TempDir(), "main"); err == nil {
+	if err := RebaseOnto(t.Context(), t.TempDir(), "main"); err == nil {
 		t.Error("expected error on non-repo")
 	}
 }

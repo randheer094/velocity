@@ -4,8 +4,10 @@ package code
 // to the webhook queue. server.Run wires it to webhook.Enqueue;
 // pre-startup it's a no-op so unit tests that don't care about
 // queueing can ignore it. Keeps code from importing webhook (which
-// already imports code).
-var EnqueueFn = func(kind, name string, payload any) {}
+// already imports code). Returns true on a successful enqueue so
+// callers can fall back to a synchronous step when the queue is
+// full or down.
+var EnqueueFn = func(kind, name string, payload any) bool { return false }
 
 // Kind string for the cleanup follow-up code enqueues. Mirror of
 // the canonical KindCodeCleanup definition in

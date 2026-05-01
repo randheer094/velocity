@@ -65,7 +65,7 @@ func TestFindOpenPRFound(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`[{"html_url":"https://gh/1","number":1}]`))
 	})
-	if got := c.FindOpenPR("o/r", "feat", "main"); got != "https://gh/1" {
+	if got := c.FindOpenPR(t.Context(), "o/r", "feat", "main"); got != "https://gh/1" {
 		t.Errorf("FindOpenPR = %q", got)
 	}
 }
@@ -74,7 +74,7 @@ func TestFindOpenPRNone(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`[]`))
 	})
-	if got := c.FindOpenPR("o/r", "feat", "main"); got != "" {
+	if got := c.FindOpenPR(t.Context(), "o/r", "feat", "main"); got != "" {
 		t.Errorf("expected empty: %q", got)
 	}
 }
@@ -83,7 +83,7 @@ func TestFindOpenPRBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	})
-	if got := c.FindOpenPR("o/r", "feat", "main"); got != "" {
+	if got := c.FindOpenPR(t.Context(), "o/r", "feat", "main"); got != "" {
 		t.Errorf("expected empty on bad JSON: %q", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestFindOpenPRError(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	if got := c.FindOpenPR("o/r", "feat", "main"); got != "" {
+	if got := c.FindOpenPR(t.Context(), "o/r", "feat", "main"); got != "" {
 		t.Errorf("expected empty on err: %q", got)
 	}
 }
@@ -117,7 +117,7 @@ func TestCreateOrUpdatePRCreate(t *testing.T) {
 			w.Write([]byte(`{"html_url":"https://gh/2"}`))
 		}
 	})
-	got := c.CreateOrUpdatePR("o/r", "T", "B", "feat", "main")
+	got := c.CreateOrUpdatePR(t.Context(), "o/r", "T", "B", "feat", "main")
 	if got != "https://gh/2" || !posted {
 		t.Errorf("CreateOrUpdatePR = %q posted=%v", got, posted)
 	}
@@ -134,7 +134,7 @@ func TestCreateOrUpdatePRUpdate(t *testing.T) {
 			w.Write([]byte(`{}`))
 		}
 	})
-	got := c.CreateOrUpdatePR("o/r", "T", "B", "feat", "main")
+	got := c.CreateOrUpdatePR(t.Context(), "o/r", "T", "B", "feat", "main")
 	if got != "https://gh/1" {
 		t.Errorf("expected existing PR url, got %q", got)
 	}
@@ -152,7 +152,7 @@ func TestCreateOrUpdatePRCreateError(t *testing.T) {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 		}
 	})
-	if got := c.CreateOrUpdatePR("o/r", "T", "B", "feat", "main"); got != "" {
+	if got := c.CreateOrUpdatePR(t.Context(), "o/r", "T", "B", "feat", "main"); got != "" {
 		t.Errorf("expected empty on POST error: %q", got)
 	}
 }
@@ -166,7 +166,7 @@ func TestCreateOrUpdatePRCreateBadJSON(t *testing.T) {
 			w.Write([]byte("not json"))
 		}
 	})
-	if got := c.CreateOrUpdatePR("o/r", "T", "B", "feat", "main"); got != "" {
+	if got := c.CreateOrUpdatePR(t.Context(), "o/r", "T", "B", "feat", "main"); got != "" {
 		t.Errorf("expected empty on bad JSON: %q", got)
 	}
 }
@@ -184,7 +184,7 @@ func TestGetWithRetryRetries(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	resp, _, err := c.getWithRetry("/repos/o/r/pulls")
+	resp, _, err := c.getWithRetry(t.Context(), "/repos/o/r/pulls")
 	if err != nil || resp == nil || resp.StatusCode != 200 {
 		t.Errorf("expected success after retries: err=%v resp=%v", err, resp)
 	}
@@ -202,7 +202,7 @@ func TestGetWithRetryExhausts(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	resp, _, _ := c.getWithRetry("/repos/o/r/pulls")
+	resp, _, _ := c.getWithRetry(t.Context(), "/repos/o/r/pulls")
 	if resp == nil || resp.StatusCode != 429 {
 		t.Errorf("expected 429 after exhaust, got %v", resp)
 	}
@@ -215,7 +215,7 @@ func TestUpdatePRError(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	})
-	c.updatePR("o/r", 1, "T", "B")
+	c.updatePR(t.Context(), "o/r", 1, "T", "B")
 }
 
 func TestNewWithoutToken(t *testing.T) {
@@ -242,7 +242,7 @@ func TestAddPRCommentOK(t *testing.T) {
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 	})
-	if !c.AddPRComment("o/r", 7, "hi") || !posted {
+	if !c.AddPRComment(t.Context(), "o/r", 7, "hi") || !posted {
 		t.Errorf("AddPRComment should succeed")
 	}
 }
@@ -251,14 +251,14 @@ func TestAddPRCommentFail(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	})
-	if c.AddPRComment("o/r", 1, "hi") {
+	if c.AddPRComment(t.Context(), "o/r", 1, "hi") {
 		t.Error("should return false on 403")
 	}
 }
 
 func TestAddPRCommentHTTPError(t *testing.T) {
 	c := &Client{token: "t", http: &http.Client{Transport: errTransport{}}}
-	if c.AddPRComment("o/r", 1, "hi") {
+	if c.AddPRComment(t.Context(), "o/r", 1, "hi") {
 		t.Error("should return false on transport error")
 	}
 }
@@ -283,7 +283,7 @@ func TestPRHeadBranchOK(t *testing.T) {
 		}
 		w.WriteHeader(404)
 	})
-	if got := c.PRHeadBranch("o/r", 9); got != "PROJ-1" {
+	if got := c.PRHeadBranch(t.Context(), "o/r", 9); got != "PROJ-1" {
 		t.Errorf("PRHeadBranch = %q", got)
 	}
 }
@@ -295,7 +295,7 @@ func TestPRHeadBranchErrors(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	if got := c.PRHeadBranch("o/r", 1); got != "" {
+	if got := c.PRHeadBranch(t.Context(), "o/r", 1); got != "" {
 		t.Errorf("expected empty on 403: %q", got)
 	}
 }
@@ -313,7 +313,7 @@ func TestWorkflowRunFailureSummaryHappyPath(t *testing.T) {
 			t.Errorf("unexpected %s", r.URL.Path)
 		}
 	})
-	got := c.WorkflowRunFailureSummary("o/r", 42)
+	got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 42)
 	if !strings.Contains(got, "=== job: test (failed) ===") ||
 		!strings.Contains(got, "FAIL: TestX") {
 		t.Errorf("summary missing parts: %q", got)
@@ -333,7 +333,7 @@ func TestWorkflowRunFailureSummaryMultipleFailures(t *testing.T) {
 			_, _ = w.Write([]byte("unit test FAIL"))
 		}
 	})
-	got := c.WorkflowRunFailureSummary("o/r", 7)
+	got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 7)
 	if !strings.Contains(got, "lint") || !strings.Contains(got, "unit") {
 		t.Errorf("both jobs should appear: %q", got)
 	}
@@ -346,7 +346,7 @@ func TestWorkflowRunFailureSummaryNoFailures(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"jobs":[{"id":1,"name":"a","conclusion":"success"}]}`))
 	})
-	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+	if got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 1); got != "" {
 		t.Errorf("expected empty: %q", got)
 	}
 }
@@ -358,7 +358,7 @@ func TestWorkflowRunFailureSummaryJobsAPIError(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+	if got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 1); got != "" {
 		t.Errorf("expected empty on API error: %q", got)
 	}
 }
@@ -367,7 +367,7 @@ func TestWorkflowRunFailureSummaryJobsBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	})
-	if got := c.WorkflowRunFailureSummary("o/r", 1); got != "" {
+	if got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 1); got != "" {
 		t.Errorf("expected empty on bad JSON: %q", got)
 	}
 }
@@ -388,7 +388,7 @@ func TestWorkflowRunFailureSummaryLogError(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	got := c.WorkflowRunFailureSummary("o/r", 1)
+	got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 1)
 	if strings.Contains(got, "job: a") {
 		t.Errorf("failed-log job a should be skipped: %q", got)
 	}
@@ -407,7 +407,7 @@ func TestWorkflowRunFailureSummaryTruncation(t *testing.T) {
 			_, _ = w.Write([]byte(big))
 		}
 	})
-	got := c.WorkflowRunFailureSummary("o/r", 1)
+	got := c.WorkflowRunFailureSummary(t.Context(), "o/r", 1)
 	if !strings.Contains(got, "[truncated]") {
 		t.Errorf("expected truncation marker: %q", got[:min(200, len(got))])
 	}
@@ -420,7 +420,7 @@ func TestPRHeadBranchBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	})
-	if got := c.PRHeadBranch("o/r", 1); got != "" {
+	if got := c.PRHeadBranch(t.Context(), "o/r", 1); got != "" {
 		t.Errorf("expected empty: %q", got)
 	}
 }

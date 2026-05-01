@@ -70,9 +70,9 @@ func recordFailure(ctx context.Context, issueKey, parentKey, repoURL, title, sta
 	slog.Error("code: stage failed", "key", issueKey, "stage", stage, "err", err)
 	failedName := status.SubtaskJiraName(status.CodingFailed)
 	if client := jira.Shared(); client != nil {
-		_ = client.CommentIssue(issueKey, renderFailureComment("code", stage, msg))
+		_ = client.CommentIssue(ctx, issueKey, renderFailureComment("code", stage, msg))
 		if failedName != "" {
-			_ = client.Transition(issueKey, failedName)
+			_ = client.Transition(ctx, issueKey, failedName)
 		}
 	}
 	if err := db.MarkCodeFailed(ctx, issueKey, parentKey, repoURL, title, issueKey, failedName, stage, msg); err != nil {

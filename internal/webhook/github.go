@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,14 +46,15 @@ func (h GithubHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	event := r.Header.Get("X-GitHub-Event")
 	switch event {
 	case "pull_request":
 		handlePullRequest(w, body)
 	case "workflow_run":
-		handleWorkflowRun(w, body)
+		handleWorkflowRun(ctx, w, body)
 	case "issue_comment":
-		handleIssueComment(w, body)
+		handleIssueComment(ctx, w, body)
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "event": event})
 	}
@@ -93,7 +95,7 @@ func handlePullRequest(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": branch})
 }
 
-func handleWorkflowRun(w http.ResponseWriter, body []byte) {
+func handleWorkflowRun(ctx context.Context, w http.ResponseWriter, body []byte) {
 	var payload struct {
 		Action      string `json:"action"`
 		WorkflowRun struct {
@@ -134,7 +136,7 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 	prURL := prHTMLURL(repoFullName, prNum)
 
 	slog.Info("github webhook: CI failure, iterating", "branch", branch, "workflow", payload.WorkflowRun.Name, "pr", prNum)
-	summary := fetchWorkflowFailureSummary(repoFullName, payload.WorkflowRun.ID)
+	summary := fetchWorkflowFailureSummary(ctx, repoFullName, payload.WorkflowRun.ID)
 	reason := buildWorkflowRunInstruction(payload.WorkflowRun.Name, payload.WorkflowRun.HTMLURL, summary)
 	hint := deriveCICommitHint(payload.WorkflowRun.Name, summary)
 	Enqueue(KindCodeIterate, "code.Iterate:ci:"+branch, codeIteratePayload{
@@ -150,11 +152,11 @@ func handleWorkflowRun(w http.ResponseWriter, body []byte) {
 
 // fetchWorkflowFailureSummary is a package-level var so tests can stub
 // the network call out.
-var fetchWorkflowFailureSummary = func(repoFullName string, runID int64) string {
+var fetchWorkflowFailureSummary = func(ctx context.Context, repoFullName string, runID int64) string {
 	if repoFullName == "" || runID == 0 {
 		return ""
 	}
-	return github.New().WorkflowRunFailureSummary(repoFullName, runID)
+	return github.New().WorkflowRunFailureSummary(ctx, repoFullName, runID)
 }
 
 // buildWorkflowRunInstruction composes the /velocity-free iterate
@@ -214,7 +216,7 @@ func truncateHint(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func handleIssueComment(w http.ResponseWriter, body []byte) {
+func handleIssueComment(ctx context.Context, w http.ResponseWriter, body []byte) {
 	var payload struct {
 		Action string `json:"action"`
 		Issue  struct {
@@ -250,13 +252,13 @@ func handleIssueComment(w http.ResponseWriter, body []byte) {
 	prNumber := payload.Issue.Number
 	if instruction == "" {
 		if repo != "" && prNumber > 0 {
-			github.New().AddPRComment(repo, prNumber, "Usage: `/velocity <instruction>` — describe the change you want.")
+			github.New().AddPRComment(ctx, repo, prNumber, "Usage: `/velocity <instruction>` — describe the change you want.")
 		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "empty"})
 		return
 	}
 
-	branch := lookupBranchForPR(repo, prNumber)
+	branch := lookupBranchForPR(ctx, repo, prNumber)
 	if branch == "" {
 		slog.Info("github webhook: /velocity could not resolve PR head branch", "repo", repo, "pr", prNumber)
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "no-branch"})
@@ -302,9 +304,9 @@ func prHTMLURL(fullName string, number int) string {
 
 // lookupBranchForPR asks GitHub for a PR's head ref. Returning "" is
 // safe — callers fall back to the "cannot resolve branch" path.
-var lookupBranchForPR = func(repoFullName string, number int) string {
+var lookupBranchForPR = func(ctx context.Context, repoFullName string, number int) string {
 	if repoFullName == "" || number <= 0 {
 		return ""
 	}
-	return github.New().PRHeadBranch(repoFullName, number)
+	return github.New().PRHeadBranch(ctx, repoFullName, number)
 }

@@ -10,7 +10,7 @@ import (
 type enqCapture struct {
 	mu     sync.Mutex
 	rows   []enqRow
-	prev   func(string, string, any)
+	prev   func(string, string, any) bool
 	stored bool
 }
 
@@ -23,10 +23,11 @@ type enqRow struct {
 func captureEnqueue(t *testing.T) *enqCapture {
 	t.Helper()
 	c := &enqCapture{prev: EnqueueFn}
-	EnqueueFn = func(kind, name string, payload any) {
+	EnqueueFn = func(kind, name string, payload any) bool {
 		c.mu.Lock()
 		c.rows = append(c.rows, enqRow{Kind: kind, Name: name, Payload: payload})
 		c.mu.Unlock()
+		return true
 	}
 	c.stored = true
 	t.Cleanup(func() {

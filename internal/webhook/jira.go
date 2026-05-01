@@ -2,6 +2,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -92,7 +93,7 @@ func (h JiraHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch eventType {
 	case "issue_assigned":
-		handleAssigned(key, fields, cfg)
+		handleAssigned(r.Context(), key, fields, cfg)
 	case "issue_generic", "issue_updated":
 		handleUpdated(key, fields)
 	default:
@@ -101,7 +102,7 @@ func (h JiraHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "key": key})
 }
 
-func handleAssigned(key string, fields map[string]any, cfg *config.Config) {
+func handleAssigned(ctx context.Context, key string, fields map[string]any, cfg *config.Config) {
 	assigneeID := ""
 	if assignee, ok := fields["assignee"].(map[string]any); ok {
 		assigneeID, _ = assignee["accountId"].(string)
@@ -137,7 +138,7 @@ func handleAssigned(key string, fields map[string]any, cfg *config.Config) {
 			return
 		}
 		if repoURL == "" {
-			repoURL = lookupParentRepo(parentKey, cfg.Jira.RepoURLField)
+			repoURL = lookupParentRepo(ctx, parentKey, cfg.Jira.RepoURLField)
 		}
 		if repoURL == "" {
 			slog.Warn("cannot resolve repo_url for developer subtask", "key", key, "parent", parentKey)
@@ -246,12 +247,12 @@ func extractRepoURL(fields map[string]any, fieldName string) string {
 	return ""
 }
 
-func lookupParentRepo(parentKey, fieldName string) string {
+func lookupParentRepo(ctx context.Context, parentKey, fieldName string) string {
 	client := jira.Shared()
 	if client == nil {
 		return ""
 	}
-	parent := client.GetIssue(parentKey)
+	parent := client.GetIssue(ctx, parentKey)
 	if parent == nil {
 		return ""
 	}

@@ -111,7 +111,7 @@ func TestGetIssue(t *testing.T) {
 		}
 		w.Write([]byte(`{"key":"X-1","fields":{"summary":"S"}}`))
 	})
-	got := c.GetIssue("X-1")
+	got := c.GetIssue(t.Context(), "X-1")
 	if got == nil || got["key"] != "X-1" {
 		t.Errorf("GetIssue = %v", got)
 	}
@@ -121,7 +121,7 @@ func TestGetIssueBrief(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"key":"X-1","fields":{"status":{"name":"In Progress"},"assignee":{"accountId":"u1"}}}`))
 	})
-	got := c.GetIssueBrief("X-1")
+	got := c.GetIssueBrief(t.Context(), "X-1")
 	if got == nil || got.Status != "In Progress" || got.AssigneeAccountID != "u1" {
 		t.Errorf("GetIssueBrief = %+v", got)
 	}
@@ -131,7 +131,7 @@ func TestGetIssueBriefBadShape(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`[]`))
 	})
-	if got := c.GetIssueBrief("X-1"); got != nil {
+	if got := c.GetIssueBrief(t.Context(), "X-1"); got != nil {
 		t.Errorf("expected nil, got %+v", got)
 	}
 }
@@ -143,7 +143,7 @@ func TestGetTasksStatus(t *testing.T) {
           {"key":"A-2","fields":{"status":{"name":"To Do"}}}
         ]}`))
 	})
-	got := c.GetTasksStatus([]string{"A-1", "A-2"})
+	got := c.GetTasksStatus(t.Context(), []string{"A-1", "A-2"})
 	if len(got) != 2 || got["A-1"].Status != "Done" {
 		t.Errorf("GetTasksStatus = %v", got)
 	}
@@ -153,7 +153,7 @@ func TestGetTasksStatusEmpty(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("should not call server")
 	})
-	got := c.GetTasksStatus(nil)
+	got := c.GetTasksStatus(t.Context(), nil)
 	if len(got) != 0 {
 		t.Errorf("expected empty: %v", got)
 	}
@@ -171,7 +171,7 @@ func TestAssign(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	if !c.Assign("X-1", "user-1") {
+	if !c.Assign(t.Context(), "X-1", "user-1") {
 		t.Error("Assign returned false")
 	}
 }
@@ -180,7 +180,7 @@ func TestAssignFails(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	})
-	if c.Assign("X-1", "user-1") {
+	if c.Assign(t.Context(), "X-1", "user-1") {
 		t.Error("Assign should return false on 400")
 	}
 }
@@ -205,7 +205,7 @@ func TestTransition(t *testing.T) {
 			return
 		}
 	})
-	if !c.Transition("X-1", "Done") {
+	if !c.Transition(t.Context(), "X-1", "Done") {
 		t.Error("Transition returned false")
 	}
 	if calls.Load() != 2 {
@@ -217,7 +217,7 @@ func TestTransitionEmptyTarget(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("should not call")
 	})
-	if c.Transition("X-1", "") {
+	if c.Transition(t.Context(), "X-1", "") {
 		t.Error("should return false")
 	}
 }
@@ -226,7 +226,7 @@ func TestTransitionTargetMissing(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"transitions":[{"id":"11","to":{"name":"Done"}}]}`))
 	})
-	if c.Transition("X-1", "Other") {
+	if c.Transition(t.Context(), "X-1", "Other") {
 		t.Error("should return false when target missing")
 	}
 }
@@ -238,7 +238,7 @@ func TestCreateSubtask(t *testing.T) {
 		w.Write([]byte(`{"key":"NEW-99"}`))
 	})
 	desc := "Goal: do it\n\n- one\n- two"
-	got := c.CreateSubtask("PROJ", "title", desc, "PROJ-1")
+	got := c.CreateSubtask(t.Context(), "PROJ", "title", desc, "PROJ-1")
 	if got != "NEW-99" {
 		t.Errorf("CreateSubtask = %q", got)
 	}
@@ -385,7 +385,7 @@ func TestCreateSubtaskFails(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	})
-	got := c.CreateSubtask("PROJ", "title", "desc", "PROJ-1")
+	got := c.CreateSubtask(t.Context(), "PROJ", "title", "desc", "PROJ-1")
 	if got != "" {
 		t.Errorf("expected empty: %q", got)
 	}
@@ -395,7 +395,7 @@ func TestCommentIssue(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
 	})
-	if !c.CommentIssue("X-1", "hi") {
+	if !c.CommentIssue(t.Context(), "X-1", "hi") {
 		t.Error("expected true")
 	}
 }
@@ -406,7 +406,7 @@ func TestCommentIssueCode(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&seen)
 		w.Write([]byte(`{}`))
 	})
-	if !c.CommentIssueCode("X-1", "│ ABC-1 │") {
+	if !c.CommentIssueCode(t.Context(), "X-1", "│ ABC-1 │") {
 		t.Error("expected true")
 	}
 	body, _ := seen["body"].(map[string]any)
@@ -424,7 +424,7 @@ func TestCommentIssueCodeBadPost(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	})
-	if c.CommentIssueCode("X-1", "hi") {
+	if c.CommentIssueCode(t.Context(), "X-1", "hi") {
 		t.Error("expected false on bad JSON post")
 	}
 }
@@ -451,7 +451,7 @@ func TestCommentIssueADF(t *testing.T) {
 			},
 		},
 	}
-	if !c.CommentIssueADF("X-1", nodes) {
+	if !c.CommentIssueADF(t.Context(), "X-1", nodes) {
 		t.Fatal("expected true")
 	}
 	body, _ := seen["body"].(map[string]any)
@@ -475,7 +475,7 @@ func TestCommentIssueADFBadPost(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	})
-	if c.CommentIssueADF("X-1", []any{}) {
+	if c.CommentIssueADF(t.Context(), "X-1", []any{}) {
 		t.Error("expected false on bad JSON post")
 	}
 }
@@ -484,7 +484,7 @@ func TestListSubtasks(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"fields":{"subtasks":[{"key":"S-1"},{"key":"S-2"},{"key":""}]}}`))
 	})
-	got := c.ListSubtasks("X-1")
+	got := c.ListSubtasks(t.Context(), "X-1")
 	if len(got) != 2 || got[0] != "S-1" {
 		t.Errorf("ListSubtasks = %v", got)
 	}
@@ -494,7 +494,7 @@ func TestListSubtasksBadShape(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`null`))
 	})
-	if got := c.ListSubtasks("X-1"); got != nil {
+	if got := c.ListSubtasks(t.Context(), "X-1"); got != nil {
 		t.Errorf("expected nil: %v", got)
 	}
 }
@@ -524,7 +524,7 @@ func TestGetServerError(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	if got := c.GetIssue("X-1"); got != nil {
+	if got := c.GetIssue(t.Context(), "X-1"); got != nil {
 		t.Errorf("GetIssue should be nil on 500: %v", got)
 	}
 }
@@ -534,7 +534,7 @@ func TestGetClientError(t *testing.T) {
 	old := getBackoffs
 	getBackoffs = []time.Duration{0, 0, 0}
 	defer func() { getBackoffs = old }()
-	if got := c.GetIssue("X-1"); got != nil {
+	if got := c.GetIssue(t.Context(), "X-1"); got != nil {
 		t.Errorf("expected nil on network error: %v", got)
 	}
 }
@@ -543,14 +543,14 @@ func TestGet404Returns(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	if got := c.GetIssue("X-1"); got != nil {
+	if got := c.GetIssue(t.Context(), "X-1"); got != nil {
 		t.Errorf("expected nil on 404: %v", got)
 	}
 }
 
 func TestPostNetworkError(t *testing.T) {
 	c := NewWithCreds("http://127.0.0.1:1", "u", "t")
-	if got := c.CreateSubtask("PROJ", "t", "d", "P-1"); got != "" {
+	if got := c.CreateSubtask(t.Context(), "PROJ", "t", "d", "P-1"); got != "" {
 		t.Errorf("expected empty: %q", got)
 	}
 }
@@ -560,7 +560,7 @@ func TestPostNoContent(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	// CommentIssue uses post; 204 should still return non-nil → CommentIssue true.
-	if !c.CommentIssue("X-1", "hi") {
+	if !c.CommentIssue(t.Context(), "X-1", "hi") {
 		t.Error("expected true on 204")
 	}
 }
@@ -569,14 +569,14 @@ func TestPostBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	})
-	if c.CommentIssue("X-1", "hi") {
+	if c.CommentIssue(t.Context(), "X-1", "hi") {
 		t.Error("expected false on bad JSON post")
 	}
 }
 
 func TestPutNetworkError(t *testing.T) {
 	c := NewWithCreds("http://127.0.0.1:1", "u", "t")
-	if c.Assign("X-1", "u") {
+	if c.Assign(t.Context(), "X-1", "u") {
 		t.Error("expected false on network error")
 	}
 }
@@ -585,7 +585,7 @@ func TestGetBadJSON(t *testing.T) {
 	c, _ := fakeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	})
-	if got := c.GetIssue("X-1"); got != nil {
+	if got := c.GetIssue(t.Context(), "X-1"); got != nil {
 		t.Errorf("expected nil on bad JSON: %v", got)
 	}
 }

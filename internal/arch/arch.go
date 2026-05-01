@@ -108,7 +108,7 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 
 	*stage = "transition-planning"
 	if planning := status.TaskJiraName(status.Planning); planning != "" {
-		if !client.Transition(parentKey, planning) {
+		if !client.Transition(ctx, parentKey, planning) {
 			slog.Error("arch: transition to planning failed", "key", parentKey, "target", planning)
 		}
 	}
@@ -119,7 +119,7 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	if err := os.MkdirAll(config.WorkspaceDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir workspaces: %w", err)
 	}
-	if err := git.Clone(repoURL, workspace); err != nil {
+	if err := git.Clone(ctx, repoURL, workspace); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
@@ -178,7 +178,7 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 			if description == "" {
 				description = t.Title
 			}
-			key := client.CreateSubtask(projectKey, t.Title, description, parentKey)
+			key := client.CreateSubtask(ctx, projectKey, t.Title, description, parentKey)
 			if key == "" {
 				return fmt.Errorf("failed to create sub-task %q (wave %d, idx %d)", t.Title, waveIdx, taskIdx)
 			}
@@ -188,7 +188,7 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 	}
 
 	if content := buildWavesComment(p.Waves); len(content) > 0 {
-		if !client.CommentIssueADF(parentKey, content) {
+		if !client.CommentIssueADF(ctx, parentKey, content) {
 			slog.Warn("arch: failed to post plan comment", "key", parentKey)
 		}
 	}
@@ -200,7 +200,7 @@ func plan(ctx context.Context, parentKey, repoURL, title, requirement string, st
 
 	*stage = "transition-coding"
 	if coding := status.TaskJiraName(status.Coding); coding != "" {
-		if !client.Transition(parentKey, coding) {
+		if !client.Transition(ctx, parentKey, coding) {
 			slog.Error("arch: transition to coding failed", "key", parentKey, "target", coding)
 		}
 	}
@@ -245,7 +245,7 @@ func AdvanceWave(ctx context.Context, parentKey string) error {
 			map[string]any{"parent_key": parentKey})
 		return nil
 	}
-	issues := client.GetTasksStatus(keys)
+	issues := client.GetTasksStatus(ctx, keys)
 	if !allDone(issues, keys) {
 		slog.Info("arch: wave still in progress", "key", parentKey, "wave", p.ActiveWaveIdx)
 		return nil
@@ -295,7 +295,7 @@ func AssignWave(ctx context.Context, parentKey string, waveIdx int) error {
 			slog.Warn("arch: wave task missing jira key", "title", t.Title, "parent", parentKey)
 			continue
 		}
-		if !client.Assign(key, cfg.Jira.DeveloperJiraID) {
+		if !client.Assign(ctx, key, cfg.Jira.DeveloperJiraID) {
 			slog.Error("arch: assign failed", "key", key)
 		}
 	}
@@ -322,7 +322,7 @@ func Archive(ctx context.Context, parentKey string) error {
 	}
 	done := status.TaskJiraName(status.Done)
 	if done != "" {
-		if !client.Transition(parentKey, done) {
+		if !client.Transition(ctx, parentKey, done) {
 			return fmt.Errorf("failed to transition parent %s to %s", parentKey, done)
 		}
 	}

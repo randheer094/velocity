@@ -27,10 +27,11 @@ func captureEnq(t *testing.T) *struct {
 		mu   sync.Mutex
 		rows []enqRow
 	}{}
-	EnqueueFn = func(kind, name string, payload any) {
+	EnqueueFn = func(kind, name string, payload any) bool {
 		cap.mu.Lock()
 		defer cap.mu.Unlock()
 		cap.rows = append(cap.rows, enqRow{Kind: kind, Name: name, Payload: payload})
+		return true
 	}
 	t.Cleanup(func() { EnqueueFn = prev })
 	return cap

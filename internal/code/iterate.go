@@ -99,7 +99,7 @@ func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint stri
 	if err := os.MkdirAll(config.WorkspaceDir, 0o755); err != nil {
 		return err
 	}
-	if err := git.Clone(repoURL, workspace); err != nil {
+	if err := git.Clone(ctx, repoURL, workspace); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 	if err := configureAuthRemote(workspace, repoFullName); err != nil {
@@ -107,13 +107,13 @@ func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint stri
 	}
 
 	*stage = "default-branch"
-	baseBranch, err := git.DefaultBranch(workspace)
+	baseBranch, err := git.DefaultBranch(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("default branch: %w", err)
 	}
 
 	*stage = "checkout-branch"
-	if err := git.CheckoutBranch(workspace, branch); err != nil {
+	if err := git.CheckoutBranch(ctx, workspace, branch); err != nil {
 		return fmt.Errorf("checkout %s: %w", branch, err)
 	}
 
@@ -134,7 +134,7 @@ func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint stri
 	if h := strings.TrimSpace(commitHint); h != "" {
 		commitMsg = fmt.Sprintf("%s: %s", branch, h)
 	}
-	committed, err := git.AddAllAndCommit(workspace, commitMsg)
+	committed, err := git.AddAllAndCommit(ctx, workspace, commitMsg)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -145,7 +145,7 @@ func iterate(ctx context.Context, repoURL, branch, prURL, extra, commitHint stri
 	}
 
 	*stage = "push"
-	if err := git.PushForceWithLease(workspace, branch); err != nil {
+	if err := git.PushForceWithLease(ctx, workspace, branch); err != nil {
 		return fmt.Errorf("push (force-with-lease): %w", err)
 	}
 
@@ -160,13 +160,13 @@ func reportIterateFailure(branch, prURL string, reason IterateReason, stage stri
 	// Jira comment only makes sense when the branch is a Jira issue key.
 	if data.ValidJiraKey(branch) {
 		if client := jira.Shared(); client != nil {
-			_ = client.CommentIssue(branch, renderIterateJiraComment(string(reason), stage, msg))
+			_ = client.CommentIssue(context.Background(), branch, renderIterateJiraComment(string(reason), stage, msg))
 		}
 	}
 
 	if prURL != "" {
 		if repo, num := parsePRURL(prURL); repo != "" && num > 0 {
-			github.New().AddPRComment(repo, num, renderIteratePRComment(stage, msg))
+			github.New().AddPRComment(context.Background(), repo, num, renderIteratePRComment(stage, msg))
 		}
 	}
 }
