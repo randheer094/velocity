@@ -2,16 +2,18 @@
 # check-major.sh — fail the release CI gate if the supplied tag is
 # inconsistent with internal/version. Three layered assertions:
 #
-#   1. Tag follows the canonical vMAJOR.MINOR.PATCH shape.
-#   2. Tag matches `cat internal/version/VERSION` exactly. The
-#      VERSION file is the source of truth for the binary's version
-#      (embedded via //go:embed); a release whose tag drifts from
-#      VERSION ships a binary that under-reports its own version.
+#   1. Tag follows the canonical MAJOR.MINOR.PATCH shape (a leading
+#      "v" is accepted but not required).
+#   2. Tag matches `cat internal/version/VERSION` after stripping a
+#      leading "v" from each side. The VERSION file is the source
+#      of truth for the binary's version (embedded via //go:embed);
+#      a release whose tag drifts from VERSION ships a binary that
+#      under-reports its own version.
 #   3. The leading numeric component matches the `const Major`
 #      compiled into internal/version. Bumping a major requires
 #      bumping both the file AND the const.
 #
-# Usage: scripts/check-major.sh v0.6.1
+# Usage: scripts/check-major.sh v0.6.1   # or 0.6.1
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
@@ -22,19 +24,20 @@ TAG="$1"
 VERSION_FILE="internal/version/VERSION"
 
 # 1. Shape.
-if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
-  echo "check-major: tag $TAG does not match the canonical vMAJOR.MINOR.PATCH format" >&2
-  echo "             expected e.g. v0.6.0, v0.6.0-rc1, v1.2.3+build.4" >&2
+if ! [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+  echo "check-major: tag $TAG does not match the canonical MAJOR.MINOR.PATCH format" >&2
+  echo "             expected e.g. v0.6.0, 0.6.0, v0.6.0-rc1, 1.2.3+build.4" >&2
   exit 1
 fi
 
-# 2. Tag vs VERSION file.
+# 2. Tag vs VERSION file. Compare with leading "v" stripped from
+# each side so that 0.6.0 and v0.6.0 are treated as equivalent.
 if [ ! -f "$VERSION_FILE" ]; then
   echo "check-major: $VERSION_FILE missing — cannot verify tag" >&2
   exit 1
 fi
 FILE_TAG=$(tr -d '[:space:]' < "$VERSION_FILE")
-if [ "$TAG" != "$FILE_TAG" ]; then
+if [ "${TAG#v}" != "${FILE_TAG#v}" ]; then
   echo "check-major: release tag $TAG does not match $VERSION_FILE ($FILE_TAG)" >&2
   echo "             update $VERSION_FILE before tagging." >&2
   exit 1

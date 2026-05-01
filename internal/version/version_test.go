@@ -47,10 +47,11 @@ func TestParsedMajorMatchesConst(t *testing.T) {
 
 func TestTagShape(t *testing.T) {
 	// Same shape that scripts/check-major.sh accepts — keeps the
-	// release CI gate and the source code aligned.
-	re := regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$`)
+	// release CI gate and the source code aligned. A leading "v"
+	// is accepted but not required.
+	re := regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$`)
 	if !re.MatchString(Tag) {
-		t.Errorf("Tag %q does not match canonical vMAJOR.MINOR.PATCH shape", Tag)
+		t.Errorf("Tag %q does not match canonical MAJOR.MINOR.PATCH shape", Tag)
 	}
 }
 
